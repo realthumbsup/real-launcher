@@ -1,263 +1,229 @@
-package com.realos.launcher
-
+import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.view.View
-import android.view.animation.DecelerateInterpolator
-import android.view.animation.OvershootInterpolator
-import android.widget.ImageView
-import android.widget.TextView
-import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
-import androidx.recyclerview.widget.GridLayoutManager
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.graphics.drawable.toBitmap
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
-data class AppEntry(
-    val label: String,
-    val packageName: String,
-    val icon: android.graphics.drawable.Drawable
-)
-
-class MainActivity : AppCompatActivity() {
-
-    private lateinit var tileGrid: RecyclerView
-    private lateinit var drawerList: RecyclerView
-    private lateinit var drawerPanel: View
-    private lateinit var timeText: TextView
-    private lateinit var logoButton: ImageView
-    private lateinit var dimView: View
-    private lateinit var overlayIcon: ImageView
-
-    private val allApps = mutableListOf<AppEntry>()
-    private val homeApps = mutableListOf<AppEntry>()
-    private var drawerOpen = false
-    private var animating = false
-
-    private val clockHandler = Handler(Looper.getMainLooper())
-    private val clockRunnable = object : Runnable {
-        override fun run() {
-            timeText.text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-            clockHandler.postDelayed(this, 1000)
-        }
-    }
-
+class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        if (!isRealOs()) {
-            Toast.makeText(this, "real.launcher only runs on real.os", Toast.LENGTH_LONG).show()
-            finish()
-            return
-        }
-
-        setContentView(R.layout.activity_main)
-
-        tileGrid    = findViewById(R.id.tileGrid)
-        drawerList  = findViewById(R.id.drawerList)
-        drawerPanel = findViewById(R.id.drawerPanel)
-        timeText    = findViewById(R.id.timeText)
-        logoButton  = findViewById(R.id.logoButton)
-        dimView     = findViewById(R.id.dimView)
-        overlayIcon = findViewById(R.id.overlayIcon)
-
-        loadApps()
-
-        tileGrid.layoutManager = GridLayoutManager(this, 3)
-        tileGrid.adapter = TileAdapter(homeApps) { entry, iconView ->
-            launchWithAnimation(entry, iconView)
-        }
-
-        drawerList.layoutManager = LinearLayoutManager(this)
-        drawerList.adapter = DrawerAdapter(allApps) { entry, iconView ->
-            closeDrawer()
-            drawerPanel.postDelayed({ launchWithAnimation(entry, iconView) }, 240)
-        }
-
-        drawerPanel.visibility = View.GONE
-
-        logoButton.setOnClickListener {
-            if (drawerOpen) closeDrawer() else openDrawer()
-        }
-
-        clockHandler.post(clockRunnable)
-    }
-
-    private fun isRealOs(): Boolean {
-        val display = Build.DISPLAY ?: ""
-        val prop = try {
-            val c = Class.forName("android.os.SystemProperties")
-            val m = c.getMethod("get", String::class.java)
-            m.invoke(null, "ro.realos.version") as? String ?: ""
-        } catch (_: Throwable) { "" }
-        return display.contains("real.os", true) ||
-               display.contains("realos", true) ||
-               prop.isNotEmpty()
-    }
-
-    private fun loadApps() {
-        val pm = packageManager
-        val intent = Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
-        val seen = HashSet<String>()
-
-        for (ri in pm.queryIntentActivities(intent, 0)) {
-            val pkg = ri.activityInfo.packageName
-            if (pkg == packageName) continue
-            if (!seen.add(pkg)) continue
-            val e = AppEntry(ri.loadLabel(pm).toString(), pkg, ri.loadIcon(pm))
-            allApps.add(e)
-            if (homeApps.size < 12) homeApps.add(e)
-        }
-        allApps.sortBy { it.label.lowercase() }
-    }
-
-    private fun launchWithAnimation(entry: AppEntry, sourceIcon: View) {
-        if (animating) return
-        animating = true
-
-        val loc = IntArray(2)
-        sourceIcon.getLocationOnScreen(loc)
-        val startX = loc[0]
-        val startY = loc[1]
-        val startW = sourceIcon.width.coerceAtLeast(1)
-        val startH = sourceIcon.height.coerceAtLeast(1)
-
-        overlayIcon.setImageDrawable(entry.icon)
-        overlayIcon.x = startX.toFloat()
-        overlayIcon.y = startY.toFloat()
-        overlayIcon.layoutParams = overlayIcon.layoutParams.apply {
-            width = startW
-            height = startH
-        }
-        overlayIcon.scaleX = 1f
-        overlayIcon.scaleY = 1f
-        overlayIcon.rotation = 0f
-        overlayIcon.alpha = 1f
-        overlayIcon.visibility = View.VISIBLE
-
-        dimView.visibility = View.VISIBLE
-        dimView.alpha = 0f
-        dimView.animate().alpha(0.85f).setDuration(200).start()
-
-        val screenW = resources.displayMetrics.widthPixels.toFloat()
-        val targetScale = (screenW * 0.6f) / startW
-
-        overlayIcon.animate()
-            .scaleX(targetScale)
-            .scaleY(targetScale)
-            .rotation(8f)
-            .setDuration(380)
-            .setInterpolator(OvershootInterpolator(1.15f))
-            .withEndAction {
-                startApp(entry)
-                overlayIcon.postDelayed({
-                    overlayIcon.visibility = View.GONE
-                    dimView.visibility = View.GONE
-                    dimView.alpha = 0f
-                    overlayIcon.scaleX = 1f
-                    overlayIcon.scaleY = 1f
-                    overlayIcon.rotation = 0f
-                    animating = false
-                }, 450)
+        setContent {
+            MaterialTheme {
+                RealOSHomeScreen()
             }
-            .start()
-    }
-
-    private fun startApp(entry: AppEntry) {
-        val intent = packageManager.getLaunchIntentForPackage(entry.packageName)
-        if (intent != null) startActivity(intent)
-    }
-
-    private fun openDrawer() {
-        drawerOpen = true
-        drawerPanel.visibility = View.VISIBLE
-        drawerPanel.translationY = drawerPanel.height.toFloat().coerceAtLeast(1f)
-        drawerPanel.animate()
-            .translationY(0f)
-            .setDuration(280)
-            .setInterpolator(DecelerateInterpolator())
-            .start()
-    }
-
-    private fun closeDrawer() {
-        drawerOpen = false
-        drawerPanel.animate()
-            .translationY(drawerPanel.height.toFloat())
-            .setDuration(220)
-            .withEndAction { drawerPanel.visibility = View.GONE }
-            .start()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (overlayIcon.visibility == View.VISIBLE) {
-            overlayIcon.postDelayed({
-                overlayIcon.visibility = View.GONE
-                dimView.visibility = View.GONE
-                overlayIcon.scaleX = 1f
-                overlayIcon.scaleY = 1f
-                overlayIcon.rotation = 0f
-                animating = false
-            }, 100)
-        } else {
-            animating = false
         }
-        clockHandler.post(clockRunnable)
     }
+}
 
-    override fun onPause() {
-        super.onPause()
-        clockHandler.removeCallbacks(clockRunnable)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RealOSHomeScreen() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pagerState = rememberPagerState(pageCount = { 2 })
+    
+    val bottomSheetState = rememberStandardBottomSheetState(initialValue = SheetValue.PartiallyExpanded)
+    val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = bottomSheetState)
+
+    var isEditMode by remember { mutableStateOf(false) }
+    var columns by remember { mutableIntStateOf(4) }
+    val installedApps = remember { getInstalledApps(context) }
+    val appList = remember { mutableStateListOf<AppInfo>().apply { addAll(installedApps) } }
+
+    val currentDate = remember { SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(Date()) }
+
+    BottomSheetScaffold(
+        scaffoldState = scaffoldState,
+        sheetPeekHeight = 80.dp,
+        sheetContainerColor = Color(0xFF1E1E1E),
+        sheetContent = {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(text = currentDate, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(text = "No new notifications", color = Color.Gray, fontSize = 16.sp)
+            }
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).background(Color.White)
+        ) {
+            TabRow(
+                selectedTabIndex = pagerState.currentPage,
+                containerColor = Color.White,
+                contentColor = Color(0xFF42A5F5),
+            ) {
+                Tab(selected = pagerState.currentPage == 0, onClick = { scope.launch { pagerState.animateScrollToPage(0) } }, text = { Text("Home") })
+                Tab(selected = pagerState.currentPage == 1, onClick = { scope.launch { pagerState.animateScrollToPage(1) } }, text = { Text("Calendar") })
+            }
+
+            HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+                if (page == 0) {
+                    HomeTabContent(
+                        appList = appList,
+                        isEditMode = isEditMode,
+                        columns = columns,
+                        onLogoClick = { isEditMode = !isEditMode },
+                        onChangeSize = { if (columns < 6) columns++ else columns = 3 }
+                    )
+                } else {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Calendar Tab", color = Color.Gray)
+                    }
+                }
+            }
+        }
     }
+}
 
-    override fun onBackPressed() {
-        if (drawerOpen) closeDrawer() else super.onBackPressed()
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun HomeTabContent(
+    appList: MutableList<AppInfo>,
+    isEditMode: Boolean,
+    columns: Int,
+    onLogoClick: () -> Unit,
+    onChangeSize: () -> Unit
+) {
+    val context = LocalContext.current
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.real_os_logo),
+                contentDescription = "Real OS Logo",
+                modifier = Modifier
+                    .size(80.dp)
+                    .pointerInput(Unit) {
+                        detectTapGestures(onTap = { onLogoClick() })
+                    }
+            )
+        }
+
+        if (isEditMode) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Edit Mode: Drag to move", color = Color.Gray, fontSize = 12.sp)
+                Button(onClick = onChangeSize) {
+                    Text("Resize ($columns cols)")
+                }
+            }
+        }
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columns),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            itemsIndexed(appList, key = { _, app -> app.packageName }) { index, app ->
+                AppIconItem(
+                    app = app,
+                    isEditMode = isEditMode,
+                    onLaunch = {
+                        val intent = context.packageManager.getLaunchIntentForPackage(app.packageName)
+                        if (intent != null) context.startActivity(intent)
+                    },
+                    onMove = { fromIndex, toIndex ->
+                        if (toIndex in appList.indices) {
+                            val item = appList.removeAt(fromIndex)
+                            appList.add(toIndex, item)
+                        }
+                    },
+                    index = index
+                )
+            }
+        }
     }
+}
 
-    class TileAdapter(
-        private val items: List<AppEntry>,
-        private val onClick: (AppEntry, View) -> Unit
-    ) : RecyclerView.Adapter<TileAdapter.VH>() {
-        inner class VH(v: View) : RecyclerView.ViewHolder(v) {
-            val icon: ImageView = v.findViewById(R.id.tileIcon)
-            val label: TextView = v.findViewById(R.id.tileLabel)
-        }
-        override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): VH {
-            val v = android.view.LayoutInflater.from(parent.context).inflate(R.layout.item_tile, parent, false)
-            return VH(v)
-        }
-        override fun onBindViewHolder(holder: VH, position: Int) {
-            val e = items[position]
-            holder.icon.setImageDrawable(e.icon)
-            holder.label.text = e.label
-            holder.itemView.setOnClickListener { onClick(e, holder.icon) }
-        }
-        override fun getItemCount() = items.size
-    }
+@Composable
+fun AppIconItem(
+    app: AppInfo,
+    isEditMode: Boolean,
+    onLaunch: () -> Unit,
+    onMove: (Int, Int) -> Unit,
+    index: Int
+) {
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
 
-    class DrawerAdapter(
-        private val items: List<AppEntry>,
-        private val onClick: (AppEntry, View) -> Unit
-    ) : RecyclerView.Adapter<DrawerAdapter.VH>() {
-        inner class VH(v: View) : RecyclerView.ViewHolder(v) {
-            val icon: ImageView = v.findViewById(R.id.drawerIcon)
-            val label: TextView = v.findViewById(R.id.drawerLabel)
-        }
-        override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): VH {
-            val v = android.view.LayoutInflater.from(parent.context).inflate(R.layout.item_drawer, parent, false)
-            return VH(v)
-        }
-        override fun onBindViewHolder(holder: VH, position: Int) {
-            val e = items[position]
-            holder.icon.setImageDrawable(e.icon)
-            holder.label.text = e.label
-            holder.itemView.setOnClickListener { onClick(e, holder.icon) }
-        }
-        override fun getItemCount() = items.size
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .offset(x = offsetX.dp, y = offsetY.dp)
+            .pointerInput(isEditMode) {
+                if (isEditMode) {
+                    detectDragGesturesAfterLongPress(
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            offsetX += dragAmount.x / density
+                            offsetY += dragAmount.y / density
+                        },
+                        onDragEnd = {
+                            val colShift = (offsetX / 80).toInt()
+                            val rowShift = (offsetY / 100).toInt() * 4
+                            val newIndex = index + colShift + rowShift
+                            onMove(index, newIndex)
+                            offsetX = 0f
+                            offsetY = 0f
+                        }
+                    )
+                } else {
+                    detectTapGestures(onTap = { onLaunch() })
+                }
+            }
+    ) {
+        Text(
+            text = app.label,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = Color.DarkGray,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        
+        Image(
+            bitmap = app.icon.toBitmap(100, 100).asImageBitmap(),
+            contentDescription = app.label,
+            modifier = Modifier.size(56.dp)
+        )
     }
 }
