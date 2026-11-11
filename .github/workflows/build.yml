@@ -15,9 +15,15 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4.0.4
         with:
-          packages: platform-tools platforms;android-34 build-tools;34.0.0
-      - run: chmod +x gradlew || true
-      - run: ./gradlew assembleDebug
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Generate Gradle wrapper
+        run: gradle wrapper --gradle-version 8.7
+      - name: Build debug APK
+        run: ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
         with:
           name: real-launcher-debug
