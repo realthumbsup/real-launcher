@@ -16,6 +16,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -33,6 +36,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -143,7 +147,7 @@ class MainActivity : ComponentActivity() {
 fun RealOSHomeScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val pagerState = rememberPagerState(initialPage = 1, pageCount = { 3 })
+    val pagerState = rememberPagerState(initialPage = 1, pageCount = { 4 })
     val bottomSheetState = rememberStandardBottomSheetState(initialValue = SheetValue.PartiallyExpanded)
     val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = bottomSheetState)
 
@@ -247,7 +251,7 @@ fun RealOSHomeScreen() {
             modifier = Modifier.padding(padding),
             bottomBar = {
                 Surface(color = Color(0xFF1F1F1F), shadowElevation = 8.dp) {
-                    Row(Modifier.fillMaxWidth().height(80.dp).padding(horizontal = 24.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().height(80.dp).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { scope.launch { pagerState.animateScrollToPage(0) } }) {
                             Icon(Icons.Default.DateRange, "Calendar", tint = if(pagerState.currentPage == 0) Color(0xFF0078D7) else Color.Gray)
                         }
@@ -259,7 +263,10 @@ fun RealOSHomeScreen() {
                             Image(painterResource(id = R.drawable.real_os_logo), "Logo", modifier = Modifier.size(48.dp))
                         }
                         IconButton(onClick = { scope.launch { pagerState.animateScrollToPage(2) } }) {
-                            Icon(Icons.Default.Star, "Weather", tint = if(pagerState.currentPage == 2) Color(0xFF0078D7) else Color.Gray)
+                            Icon(Icons.Default.List, "All Apps", tint = if(pagerState.currentPage == 2) Color(0xFF0078D7) else Color.Gray)
+                        }
+                        IconButton(onClick = { scope.launch { pagerState.animateScrollToPage(3) } }) {
+                            Icon(Icons.Default.Star, "Weather", tint = if(pagerState.currentPage == 3) Color(0xFF0078D7) else Color.Gray)
                         }
                     }
                 }
@@ -285,7 +292,8 @@ fun RealOSHomeScreen() {
                         when (page) {
                             0 -> CalendarTabContent()
                             1 -> HomeTabContent(appList, isEditMode, columns)
-                            2 -> WeatherTabContent(weatherTemp, weatherHumidity, weatherCode, weatherWind, weatherLocation, activeAlerts, weatherLoading, weatherError)
+                            2 -> AllAppsListTabContent(appList)
+                            3 -> WeatherTabContent(weatherTemp, weatherHumidity, weatherCode, weatherWind, weatherLocation, activeAlerts, weatherLoading, weatherError)
                         }
                     }
                 }
@@ -474,6 +482,58 @@ fun WeatherTabContent(temp: Double?, humidity: Int?, code: Int?, wind: Double?, 
                 }
             }
             Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+
+@Composable
+fun AllAppsListTabContent(appList: List<AppInfo>) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().background(Color.Black),
+        contentPadding = PaddingValues(16.dp)
+    ) {
+        item {
+            Text(
+                text = "All Apps",
+                color = Color.White,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+        }
+        items(appList, key = { it.packageName }) { app ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        val intent = context.packageManager.getLaunchIntentForPackage(app.packageName)
+                        if (intent != null) {
+                            val options = ActivityOptions.makeScaleUpAnimation(view, 0, 0, view.width, view.height).toBundle()
+                            context.startActivity(intent, options)
+                        }
+                    }
+                    .padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Image(
+                    bitmap = app.icon.toBitmap(100, 100).asImageBitmap(),
+                    contentDescription = app.label,
+                    modifier = Modifier.size(48.dp)
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Text(
+                    text = app.label,
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
