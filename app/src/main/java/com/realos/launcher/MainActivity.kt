@@ -1,3 +1,5 @@
+package 
+
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -41,7 +43,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun RealOSHomeScreen() {
     val context = LocalContext.current
