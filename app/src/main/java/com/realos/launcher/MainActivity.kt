@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Geocoder
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -33,10 +34,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -179,6 +182,8 @@ fun RealOSHomeScreen() {
     }
     val currentDate = remember { SimpleDateFormat("d. MMMM yyyy", Locale.getDefault()).format(Date()) }
 
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
         if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
             scope.launch {
@@ -193,8 +198,13 @@ fun RealOSHomeScreen() {
     }
 
     LaunchedEffect(Unit) {
-        val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (!hasPerm) locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        val hasLocPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!hasLocPerm) locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasNotifPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+            if (!hasNotifPerm) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         
         while (true) {
             fetchGlobalData(context) { t, h, c, w, loc, alerts, err ->
@@ -223,10 +233,11 @@ fun RealOSHomeScreen() {
 
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
-        sheetPeekHeight = 10.dp,
+        sheetPeekHeight = 32.dp,
         sheetContainerColor = Color(0xFF1F1F1F),
         sheetContent = {
-            Column(Modifier.fillMaxSize().padding(32.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 8.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.KeyboardArrowUp, "Swipe up", tint = Color.Gray, modifier = Modifier.size(32.dp).padding(bottom = 8.dp))
                 activeAlerts.forEach { alert -> AlertBanner(alert = alert, modifier = Modifier.padding(bottom = 8.dp)) }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(text = currentTime, color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.Light)
@@ -266,7 +277,7 @@ fun RealOSHomeScreen() {
                             Icon(Icons.Default.List, "All Apps", tint = if(pagerState.currentPage == 2) Color(0xFF0078D7) else Color.Gray)
                         }
                         IconButton(onClick = { scope.launch { pagerState.animateScrollToPage(3) } }) {
-                            Icon(Icons.Default.Star, "Weather", tint = if(pagerState.currentPage == 3) Color(0xFF0078D7) else Color.Gray)
+                            Icon(Icons.Default.Cloud, "Weather", tint = if(pagerState.currentPage == 3) Color(0xFF0078D7) else Color.Gray)
                         }
                     }
                 }
