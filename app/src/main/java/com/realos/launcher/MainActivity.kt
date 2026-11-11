@@ -52,7 +52,7 @@ fun RealOSHomeScreen() {
     val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = bottomSheetState)
 
     var isEditMode by remember { mutableStateOf(false) }
-    var columns by remember { mutableIntStateOf(4) }
+    var columns by remember { mutableStateOf(4) }
     val installedApps = remember { getInstalledApps(context) }
     val appList = remember { mutableStateListOf<AppInfo>().apply { addAll(installedApps) } }
 
@@ -180,8 +180,8 @@ fun AppIconItem(
     onMove: (Int, Int) -> Unit,
     index: Int
 ) {
-    var offsetX by remember { mutableFloatStateOf(0f) }
-    var offsetY by remember { mutableFloatStateOf(0f) }
+    var offsetX by remember { mutableStateOf(0f) }
+    var offsetY by remember { mutableStateOf(0f) }
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
