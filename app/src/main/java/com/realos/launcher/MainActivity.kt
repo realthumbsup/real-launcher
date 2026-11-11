@@ -55,6 +55,7 @@ import com.google.android.gms.location.LocationServices
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -188,10 +189,12 @@ fun RealOSHomeScreen() {
     ) { permissions ->
         val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
         if (granted) {
-            fetchGlobalData(context) { t, h, c, w, loc, alerts, err ->
-                weatherTemp = t; weatherHumidity = h; weatherCode = c; weatherWind = w
-                weatherLocation = loc ?: "Unknown"; activeAlerts = alerts
-                weatherError = err; weatherLoading = false
+            scope.launch {
+                fetchGlobalData(context) { t, h, c, w, loc, alerts, err ->
+                    weatherTemp = t; weatherHumidity = h; weatherCode = c; weatherWind = w
+                    weatherLocation = loc ?: "Unknown"; activeAlerts = alerts
+                    weatherError = err; weatherLoading = false
+                }
             }
         } else {
             weatherLocation = "Location Denied"; weatherError = "Location denied"; weatherLoading = false
@@ -403,10 +406,6 @@ suspend fun fetchGlobalData(
     }
 }
 
-suspend fun <T> com.google.android.gms.tasks.Task<T>.await(): T = suspendCoroutine { cont ->
-    addOnSuccessListener { cont.resume(it) }
-    addOnFailureListener { cont.resumeWithException(it) }
-}
 
 @Composable
 fun HomeTabContent(appList: MutableList<AppInfo>, isEditMode: Boolean, columns: Int) {
