@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="96dp"
+    android:layout_margin="6dp"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="#1F2937">
+    <ImageView android:id="@+id/tileIcon" android:layout_width="40dp" android:layout_height="40dp" android:scaleType="fitCenter" />
+    <TextView android:id="@+id/tileLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:gravity="center" android:maxLines="1" android:ellipsize="end" android:textColor="#E5E7EB" android:textSize="11sp" />
+</LinearLayout>

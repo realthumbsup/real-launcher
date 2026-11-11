@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.RealLauncher" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/real_bg</item>
+        <item name="android:statusBarColor">@color/real_bg</item>
+        <item name="android:navigationBarColor">@color/real_bar</item>
+    </style>
+</resources>
