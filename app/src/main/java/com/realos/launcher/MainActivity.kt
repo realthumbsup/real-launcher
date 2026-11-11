@@ -1,9 +1,5 @@
 package com.realos.launcher
 
-package 
-
-import android.content.Context
-import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -51,7 +47,7 @@ fun RealOSHomeScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { 2 })
-    
+
     val bottomSheetState = rememberStandardBottomSheetState(initialValue = SheetValue.PartiallyExpanded)
     val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = bottomSheetState)
 
@@ -83,7 +79,7 @@ fun RealOSHomeScreen() {
             TabRow(
                 selectedTabIndex = pagerState.currentPage,
                 containerColor = Color.White,
-                contentColor = Color(0xFF42A5F5),
+                contentColor = Color(0xFF42A5F5)
             ) {
                 Tab(selected = pagerState.currentPage == 0, onClick = { scope.launch { pagerState.animateScrollToPage(0) } }, text = { Text("Home") })
                 Tab(selected = pagerState.currentPage == 1, onClick = { scope.launch { pagerState.animateScrollToPage(1) } }, text = { Text("Calendar") })
@@ -223,7 +219,7 @@ fun AppIconItem(
             color = Color.DarkGray,
             modifier = Modifier.padding(bottom = 4.dp)
         )
-        
+
         Image(
             bitmap = app.icon.toBitmap(100, 100).asImageBitmap(),
             contentDescription = app.label,
