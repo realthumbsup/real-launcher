@@ -19,6 +19,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -31,14 +32,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -112,6 +115,9 @@ class MainActivity : ComponentActivity() {
 enum class LauncherTab { HOME, CALENDAR, WEATHER }
 enum class PermState { INITIAL, ASKING, GRANTED, DENIED }
 
+val GreyBg = Color(0xFF2B2B2B)
+val CardBg = Color(0xFF1F1F1F)
+
 @Composable
 fun RealOSLauncher() {
     val context = LocalContext.current
@@ -119,12 +125,16 @@ fun RealOSLauncher() {
 
     var currentTab by remember { mutableStateOf(LauncherTab.HOME) }
     var showAppDrawer by remember { mutableStateOf(false) }
-    
+    var sheetExpanded by remember { mutableStateOf(false) }
+    var isDraggingAnyTile by remember { mutableStateOf(false) }
+
     val homeApps = remember { mutableStateListOf<AppInfo>() }
     val allApps = remember { getInstalledApps(context) }
-    
+
     var columns by remember { mutableStateOf(3) }
     var isEditMode by remember { mutableStateOf(false) }
+
+    var currentTime by remember { mutableStateOf("") }
 
     var weatherTemp by remember { mutableStateOf<Double?>(null) }
     var weatherHumidity by remember { mutableStateOf<Int?>(null) }
@@ -135,6 +145,14 @@ fun RealOSLauncher() {
     var activeAlerts by remember { mutableStateOf<List<WeatherAlert>>(emptyList()) }
     var extremeAlert by remember { mutableStateOf<WeatherAlert?>(null) }
     var locationPermState by remember { mutableStateOf(PermState.INITIAL) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            currentTime = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+            delay(1000)
+        }
+    }
+    val currentDate = remember { SimpleDateFormat("EEEE, d. MMMM yyyy", Locale.getDefault()).format(Date()) }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
         val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true || permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
@@ -151,7 +169,6 @@ fun RealOSLauncher() {
         } else {
             locationPermState = PermState.DENIED
             weatherLoading = false
-            weatherLocation = "Permission Denied"
         }
     }
 
@@ -191,58 +208,200 @@ fun RealOSLauncher() {
         )
     }
 
-    Scaffold(
-        bottomBar = {
-            NavigationBar(containerColor = Color(0xFF1F1F1F)) {
-                NavigationBarItem(
-                    selected = currentTab == LauncherTab.CALENDAR && !showAppDrawer,
-                    onClick = { currentTab = LauncherTab.CALENDAR; showAppDrawer = false },
-                    icon = { Icon(Icons.Default.DateRange, "Calendar") },
-                    label = { Text("Calendar") },
-                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF0078D7), selectedTextColor = Color(0xFF0078D7))
-                )
-                NavigationBarItem(
-                    selected = currentTab == LauncherTab.HOME || showAppDrawer,
-                    onClick = { 
-                        if (showAppDrawer) { showAppDrawer = false; currentTab = LauncherTab.HOME }
-                        else { showAppDrawer = true }
-                    },
-                    icon = { Icon(Icons.Default.Home, "Home/Apps") },
-                    label = { Text("Home") },
-                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF0078D7), selectedTextColor = Color(0xFF0078D7))
-                )
-                NavigationBarItem(
-                    selected = currentTab == LauncherTab.WEATHER && !showAppDrawer,
-                    onClick = { currentTab = LauncherTab.WEATHER; showAppDrawer = false },
-                    icon = { Icon(Icons.Default.Cloud, "Weather") },
-                    label = { Text("Weather") },
-                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF0078D7), selectedTextColor = Color(0xFF0078D7))
-                )
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = GreyBg,
+            bottomBar = {
+                NavigationBar(containerColor = CardBg) {
+                    NavigationBarItem(
+                        selected = currentTab == LauncherTab.CALENDAR && !showAppDrawer,
+                        onClick = { currentTab = LauncherTab.CALENDAR; showAppDrawer = false },
+                        icon = { Icon(Icons.Default.DateRange, "Calendar") },
+                        label = { Text("Calendar") },
+                        colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF0078D7), selectedTextColor = Color(0xFF0078D7), unselectedIconColor = Color.Gray, unselectedTextColor = Color.Gray)
+                    )
+                    NavigationBarItem(
+                        selected = currentTab == LauncherTab.HOME || showAppDrawer,
+                        onClick = {
+                            if (showAppDrawer) { showAppDrawer = false; currentTab = LauncherTab.HOME }
+                            else { showAppDrawer = true }
+                        },
+                        icon = { Icon(Icons.Default.Home, "Home/Apps") },
+                        label = { Text("Home") },
+                        colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF0078D7), selectedTextColor = Color(0xFF0078D7), unselectedIconColor = Color.Gray, unselectedTextColor = Color.Gray)
+                    )
+                    NavigationBarItem(
+                        selected = currentTab == LauncherTab.WEATHER && !showAppDrawer,
+                        onClick = { currentTab = LauncherTab.WEATHER; showAppDrawer = false },
+                        icon = { Icon(Icons.Default.Cloud, "Weather") },
+                        label = { Text("Weather") },
+                        colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF0078D7), selectedTextColor = Color(0xFF0078D7), unselectedIconColor = Color.Gray, unselectedTextColor = Color.Gray)
+                    )
+                }
             }
-        }
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding).background(Color.Black)) {
-            if (showAppDrawer) {
-                AllAppsList(
-                    allApps = allApps,
-                    homeApps = homeApps,
-                    onAddToHome = { app -> if (!homeApps.contains(app)) homeApps.add(app) }
-                )
-            } else {
-                when (currentTab) {
-                    LauncherTab.HOME -> MetroHome(
+        ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding).background(GreyBg)) {
+                when {
+                    showAppDrawer -> AllAppsList(
+                        allApps = allApps,
                         homeApps = homeApps,
-                        columns = columns,
-                        isEditMode = isEditMode,
+                        onAddToHome = { app -> if (!homeApps.contains(app)) homeApps.add(app) }
+                    )
+                    currentTab == LauncherTab.CALENDAR -> CalendarView(clockTime = currentTime)
+                    currentTab == LauncherTab.WEATHER -> WeatherView(
+                        temp = weatherTemp, humidity = weatherHumidity, code = weatherCode,
+                        wind = weatherWind, location = weatherLocation, alerts = activeAlerts, loading = weatherLoading,
+                        permState = locationPermState,
+                        onRetry = {
+                            val activity = context as? androidx.activity.ComponentActivity
+                            val canAsk = activity?.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION) ?: true
+                            if (!canAsk) {
+                                val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = android.net.Uri.fromParts("package", context.packageName, null)
+                                }
+                                context.startActivity(intent)
+                            } else {
+                                locationPermState = PermState.ASKING
+                                locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                            }
+                        }
+                    )
+                    else -> MetroHome(
+                        homeApps = homeApps, columns = columns, isEditMode = isEditMode,
                         onLongPressEmptySpace = { isEditMode = true },
                         onResize = { if (columns < 5) columns++ else columns = 2 },
-                        onMove = { from, to -> if (to in homeApps.indices) { val item = homeApps.removeAt(from); homeApps.add(to, item) } }
+                        onMove = { from, to -> if (to in homeApps.indices) { val item = homeApps.removeAt(from); homeApps.add(to, item) } },
+                        onDragStateChanged = { isDraggingAnyTile = it }
                     )
-                    LauncherTab.CALENDAR -> CalendarView()
-                    LauncherTab.WEATHER -> WeatherView(
-                        temp = weatherTemp, humidity = weatherHumidity, code = weatherCode,
-                        wind = weatherWind, location = weatherLocation, alerts = activeAlerts, loading = weatherLoading
-                    )
+                }
+            }
+        }
+
+        if (isDraggingAnyTile) {
+            Box(Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = 120.dp)) {
+                Box(Modifier.size(56.dp).background(Color(0xFF0078D7), CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.ArrowDownward, "Drop zone", tint = Color.White, modifier = Modifier.size(32.dp).rotate(-45f))
+                }
+            }
+        }
+
+        BottomSheetOverlay(
+            expanded = sheetExpanded,
+            onToggle = { sheetExpanded = !sheetExpanded },
+            clockTime = currentTime,
+            dateStr = currentDate,
+            weatherTemp = weatherTemp,
+            weatherCode = weatherCode,
+            weatherDesc = getWeatherDesc(weatherCode ?: 0),
+            weatherEmoji = getWeatherEmoji(weatherCode ?: 0),
+            location = weatherLocation,
+            alerts = activeAlerts
+        )
+    }
+}
+
+@Composable
+fun BottomSheetOverlay(
+    expanded: Boolean, onToggle: () -> Unit,
+    clockTime: String, dateStr: String,
+    weatherTemp: Double?, weatherCode: Int?,
+    weatherDesc: String, weatherEmoji: String,
+    location: String, alerts: List<WeatherAlert>
+) {
+    val screenH = LocalConfiguration.current.screenHeightDp.dp
+    val collapsedH = 40.dp
+    val expandedH = screenH * 0.75f
+    val height by animateDpAsState(if (expanded) expandedH else collapsedH, tween(280), label = "sheetH")
+    val bottomPad by animateDpAsState(if (expanded) 0.dp else 80.dp, tween(280), label = "sheetPad")
+    var dragAccum by remember { mutableStateOf(0f) }
+
+    Box(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .padding(bottom = bottomPad)
+            .height(height)
+            .background(CardBg, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onVerticalDrag = { change, drag -> change.consume(); dragAccum += drag },
+                    onDragEnd = {
+                        if (dragAccum < -40f && !expanded) onToggle()
+                        else if (dragAccum > 40f && expanded) onToggle()
+                        dragAccum = 0f
+                    }
+                )
+            }
+            .pointerInput(Unit) { detectTapGestures { onToggle() } }
+    ) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 8.dp)) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                    contentDescription = "Swipe",
+                    tint = Color(0xFF0078D7),
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+
+            if (expanded) {
+                Spacer(Modifier.height(8.dp))
+                Text(clockTime, fontSize = 56.sp, fontWeight = FontWeight.Light, color = Color.White)
+                Text(dateStr, fontSize = 16.sp, color = Color.Gray)
+                Spacer(Modifier.height(20.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(weatherEmoji, fontSize = 40.sp)
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text("${weatherTemp?.toInt() ?: "--"}°C", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("$weatherDesc • $location", fontSize = 13.sp, color = Color.Gray)
+                    }
+                }
+                Spacer(Modifier.height(20.dp))
+                Text("This month", fontSize = 13.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                MiniCalendar()
+                Spacer(Modifier.height(12.dp))
+                alerts.forEach { alert ->
+                    Row(Modifier.fillMaxWidth().background(Color(0xFFB71C1C), RoundedCornerShape(8.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Warning, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(alert.headline, color = Color.White, fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MiniCalendar() {
+    val cal = Calendar.getInstance()
+    val currentDay = cal.get(Calendar.DAY_OF_MONTH)
+    val monthName = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(cal.time)
+    val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+    val firstDay = cal.apply { set(Calendar.DAY_OF_MONTH, 1) }.get(Calendar.DAY_OF_WEEK) - 1
+
+    Column(Modifier.fillMaxWidth()) {
+        Text(monthName, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(bottom = 4.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+            listOf("S","M","T","W","T","F","S").forEach { Text(it, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0078D7)) }
+        }
+        Spacer(Modifier.height(4.dp))
+        LazyVerticalGrid(columns = GridCells.Fixed(7), modifier = Modifier.heightIn(max = 200.dp)) {
+            items(firstDay) { Spacer(Modifier.size(1.dp)) }
+            items(daysInMonth) { idx ->
+                val day = idx + 1
+                val isToday = day == currentDay
+                Box(Modifier.aspectRatio(1f), contentAlignment = Alignment.Center) {
+                    if (isToday) {
+                        Box(Modifier.size(24.dp).background(Color.Red, CircleShape), contentAlignment = Alignment.Center) {
+                            Text("$day", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Text("$day", fontSize = 11.sp, color = Color.White)
+                    }
                 }
             }
         }
@@ -252,18 +411,18 @@ fun RealOSLauncher() {
 @Composable
 fun MetroHome(
     homeApps: MutableList<AppInfo>, columns: Int, isEditMode: Boolean,
-    onLongPressEmptySpace: () -> Unit, onResize: () -> Unit, onMove: (Int, Int) -> Unit
+    onLongPressEmptySpace: () -> Unit, onResize: () -> Unit, onMove: (Int, Int) -> Unit,
+    onDragStateChanged: (Boolean) -> Unit
 ) {
     Column(
-        modifier = Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onLongPress = { onLongPressEmptySpace() }) }
+        modifier = Modifier.fillMaxSize().background(GreyBg).pointerInput(Unit) { detectTapGestures(onLongPress = { onLongPressEmptySpace() }) }
     ) {
         if (isEditMode) {
             Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Edit Mode", color = Color.Gray)
+                Text("Edit Mode: Drag tiles, resize grid", color = Color.Gray, fontSize = 13.sp)
                 Button(onClick = onResize, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0078D7))) { Text("Grid: $columns Cols") }
             }
         }
-        
         if (homeApps.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("Press Home at the bottom to add apps", color = Color.Gray, fontSize = 16.sp)
@@ -276,7 +435,7 @@ fun MetroHome(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 itemsIndexed(homeApps, key = { _, app -> app.packageName }) { index, app ->
-                    MetroTile(app, isEditMode, index, columns, onMove)
+                    MetroTile(app, isEditMode, index, columns, onMove, onDragStateChanged)
                 }
             }
         }
@@ -284,7 +443,7 @@ fun MetroHome(
 }
 
 @Composable
-fun MetroTile(app: AppInfo, isEditMode: Boolean, index: Int, columns: Int, onMove: (Int, Int) -> Unit) {
+fun MetroTile(app: AppInfo, isEditMode: Boolean, index: Int, columns: Int, onMove: (Int, Int) -> Unit, onDragStateChanged: (Boolean) -> Unit) {
     val context = LocalContext.current
     val view = LocalView.current
     var offsetX by remember { mutableStateOf(0f) }
@@ -292,15 +451,14 @@ fun MetroTile(app: AppInfo, isEditMode: Boolean, index: Int, columns: Int, onMov
     var isDragging by remember { mutableStateOf(false) }
     var isLaunching by remember { mutableStateOf(false) }
 
-    // Windows 8.1 Animation States
-    val launchRotation by animateFloatAsState(if (isLaunching) -90f else 0f, tween(250, easing = FastOutSlowInEasing), label = "rot")
-    val launchScale by animateFloatAsState(if (isLaunching) 0.8f else 1f, tween(250), label = "scale")
-    val launchAlpha by animateFloatAsState(if (isLaunching) 0f else 1f, tween(250), label = "alpha")
+    val launchRotation by animateFloatAsState(if (isLaunching) 360f else 0f, tween(500, easing = FastOutSlowInEasing), label = "rot")
+    val launchScale by animateFloatAsState(if (isLaunching) 4f else 1f, tween(500, easing = FastOutSlowInEasing), label = "scale")
 
-    // The 250ms delay before launching
+    LaunchedEffect(isDragging) { onDragStateChanged(isDragging) }
+
     LaunchedEffect(isLaunching) {
         if (isLaunching) {
-            delay(250)
+            delay(500)
             val intent = context.packageManager.getLaunchIntentForPackage(app.packageName)
             if (intent != null) {
                 context.startActivity(intent, ActivityOptions.makeScaleUpAnimation(view, 0, 0, view.width, view.height).toBundle())
@@ -311,16 +469,15 @@ fun MetroTile(app: AppInfo, isEditMode: Boolean, index: Int, columns: Int, onMov
 
     BoxWithConstraints(
         modifier = Modifier.fillMaxWidth().aspectRatio(1f)
-            .zIndex(if (isDragging) 1f else 0f)
+            .zIndex(if (isDragging || isLaunching) 10f else 0f)
             .offset(x = offsetX.dp, y = offsetY.dp)
             .graphicsLayer {
                 rotationY = launchRotation
                 scaleX = launchScale
                 scaleY = launchScale
-                alpha = launchAlpha
                 cameraDistance = 12f * density
             }
-            .background(if (isDragging) Color(0xFF333333) else getMetroColor(app.packageName), RoundedCornerShape(4.dp))
+            .background(if (isDragging) Color(0xFF444444) else getMetroColor(app.packageName), RoundedCornerShape(4.dp))
             .pointerInput(isEditMode) {
                 if (isEditMode) {
                     detectDragGesturesAfterLongPress(
@@ -334,9 +491,10 @@ fun MetroTile(app: AppInfo, isEditMode: Boolean, index: Int, columns: Int, onMov
                         }
                     )
                 } else {
-                    detectTapGestures(onTap = { 
-                        isLaunching = true 
-                    })
+                    detectTapGestures(
+                        onTap = { isLaunching = true },
+                        onLongPress = { isDragging = true }
+                    )
                 }
             }.padding(8.dp)
     ) {
@@ -352,7 +510,7 @@ fun MetroTile(app: AppInfo, isEditMode: Boolean, index: Int, columns: Int, onMov
 fun AllAppsList(allApps: List<AppInfo>, homeApps: List<AppInfo>, onAddToHome: (AppInfo) -> Unit) {
     val context = LocalContext.current
     val view = LocalView.current
-    LazyColumn(modifier = Modifier.fillMaxSize().background(Color.Black), contentPadding = PaddingValues(16.dp)) {
+    LazyColumn(modifier = Modifier.fillMaxSize().background(GreyBg), contentPadding = PaddingValues(16.dp)) {
         item { Text("All Apps", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp)) }
         items(allApps, key = { it.packageName }) { app ->
             val isAlreadyOnHome = homeApps.contains(app)
@@ -363,42 +521,40 @@ fun AllAppsList(allApps: List<AppInfo>, homeApps: List<AppInfo>, onAddToHome: (A
                             val intent = context.packageManager.getLaunchIntentForPackage(app.packageName)
                             if (intent != null) context.startActivity(intent, ActivityOptions.makeScaleUpAnimation(view, 0, 0, view.width, view.height).toBundle())
                         },
-                        onLongClick = { 
-                            if (!isAlreadyOnHome) onAddToHome(app) 
-                        }
+                        onLongClick = { if (!isAlreadyOnHome) onAddToHome(app) }
                     ).padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Image(app.icon.toBitmap(100, 100).asImageBitmap(), app.label, modifier = Modifier.size(48.dp))
                 Spacer(Modifier.width(16.dp))
                 Text(app.label, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (isAlreadyOnHome) {
-                    Icon(Icons.Default.Check, "Added", tint = Color(0xFF0078D7))
-                }
+                if (isAlreadyOnHome) Icon(Icons.Default.Check, "Added", tint = Color(0xFF0078D7))
             }
         }
     }
 }
 
 @Composable
-fun CalendarView() {
+fun CalendarView(clockTime: String) {
     val cal = Calendar.getInstance()
     val currentDay = cal.get(Calendar.DAY_OF_MONTH)
     val monthName = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(cal.time)
     val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
     val firstDay = cal.apply { set(Calendar.DAY_OF_MONTH, 1) }.get(Calendar.DAY_OF_WEEK) - 1
 
-    Column(Modifier.fillMaxSize().background(Color.Black).padding(16.dp)) {
+    Column(Modifier.fillMaxSize().background(GreyBg).padding(16.dp)) {
+        Text(clockTime, fontSize = 48.sp, fontWeight = FontWeight.Light, color = Color.White)
+        Spacer(Modifier.height(16.dp))
         Text(monthName, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
         Spacer(Modifier.height(16.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-            listOf("S", "M", "T", "W", "T", "F", "S").forEach { Text(it, fontWeight = FontWeight.Bold, color = Color(0xFF0078D7)) }
+            listOf("S","M","T","W","T","F","S").forEach { Text(it, fontWeight = FontWeight.Bold, color = Color(0xFF0078D7)) }
         }
         Spacer(Modifier.height(8.dp))
         LazyVerticalGrid(columns = GridCells.Fixed(7)) {
-            items(firstDay) { Spacer(Modifier.height(1.dp)) }
-            items(daysInMonth) { index ->
-                val day = index + 1
+            items(firstDay) { Spacer(Modifier.size(1.dp)) }
+            items(daysInMonth) { idx ->
+                val day = idx + 1
                 val isToday = day == currentDay
                 Box(Modifier.aspectRatio(1f), contentAlignment = Alignment.Center) {
                     if (isToday) {
@@ -420,8 +576,29 @@ fun WeatherView(
     alerts: List<WeatherAlert>, loading: Boolean,
     permState: PermState, onRetry: () -> Unit
 ) {
-    Column(Modifier.fillMaxSize().background(Color.Black).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        if (loading) {
+    Column(Modifier.fillMaxSize().background(GreyBg).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        if (permState == PermState.INITIAL || permState == PermState.ASKING) {
+            Spacer(Modifier.height(100.dp))
+            CircularProgressIndicator(color = Color(0xFF0078D7))
+            Spacer(Modifier.height(16.dp))
+            Text("Requesting location permission...", color = Color.Gray)
+            Spacer(Modifier.height(8.dp))
+            Text("Grant Real Launcher access to your location to see accurate weather.",
+                color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center)
+        } else if (permState == PermState.DENIED) {
+            Spacer(Modifier.height(80.dp))
+            Text("📍", fontSize = 64.sp)
+            Spacer(Modifier.height(16.dp))
+            Text("Permission for location not granted",
+                color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(8.dp))
+            Text("Real Launcher needs your location to show weather for your area.",
+                color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0078D7))) {
+                Text("Grant Location Permission")
+            }
+        } else if (loading) {
             Spacer(Modifier.height(100.dp))
             CircularProgressIndicator(color = Color(0xFF0078D7))
             Spacer(Modifier.height(16.dp))
@@ -474,7 +651,7 @@ suspend fun fetchWeather(context: Context, onResult: (Double?, Int?, Int?, Doubl
         val retrofit = Retrofit.Builder().baseUrl("https://api.open-meteo.com/").addConverterFactory(GsonConverterFactory.create()).build()
         val api = retrofit.create(WeatherApi::class.java)
         val weatherResponse = withContext(Dispatchers.IO) { api.getWeather(lat, lon) }
-        
+
         onResult(weatherResponse.current.temperature_2m, weatherResponse.current.relative_humidity_2m, weatherResponse.current.weather_code, weatherResponse.current.wind_speed_10m, locationName, generateGlobalAlerts(weatherResponse.current))
     } catch (e: Exception) { onResult(null, null, null, null, "Weather Error", emptyList()) }
 }
