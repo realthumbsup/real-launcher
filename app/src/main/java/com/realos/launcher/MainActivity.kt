@@ -415,7 +415,11 @@ fun CalendarView() {
 }
 
 @Composable
-fun WeatherView(temp: Double?, humidity: Int?, code: Int?, wind: Double?, location: String, alerts: List<WeatherAlert>, loading: Boolean) {
+fun WeatherView(
+    temp: Double?, humidity: Int?, code: Int?, wind: Double?, location: String,
+    alerts: List<WeatherAlert>, loading: Boolean,
+    permState: PermState, onRetry: () -> Unit
+) {
     Column(Modifier.fillMaxSize().background(Color.Black).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         if (loading) {
             Spacer(Modifier.height(100.dp))
