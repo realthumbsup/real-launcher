@@ -110,6 +110,7 @@ class MainActivity : ComponentActivity() {
 }
 
 enum class LauncherTab { HOME, CALENDAR, WEATHER }
+enum class PermState { INITIAL, ASKING, GRANTED, DENIED }
 
 @Composable
 fun RealOSLauncher() {
@@ -133,9 +134,13 @@ fun RealOSLauncher() {
     var weatherLoading by remember { mutableStateOf(true) }
     var activeAlerts by remember { mutableStateOf<List<WeatherAlert>>(emptyList()) }
     var extremeAlert by remember { mutableStateOf<WeatherAlert?>(null) }
+    var locationPermState by remember { mutableStateOf(PermState.INITIAL) }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
+        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true || permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (granted) {
+            locationPermState = PermState.GRANTED
+            weatherLoading = true
             scope.launch {
                 fetchWeather(context) { t, h, c, w, loc, alerts ->
                     weatherTemp = t; weatherHumidity = h; weatherCode = c; weatherWind = w
@@ -143,18 +148,35 @@ fun RealOSLauncher() {
                     extremeAlert = alerts.firstOrNull { it.severity == "Extreme" }
                 }
             }
-        } else { weatherLocation = "Permission Denied"; weatherLoading = false }
+        } else {
+            locationPermState = PermState.DENIED
+            weatherLoading = false
+            weatherLocation = "Permission Denied"
+        }
     }
 
-    LaunchedEffect(Unit) {
-        val hasLocPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (!hasLocPerm) {
-            locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-        } else {
-            fetchWeather(context) { t, h, c, w, loc, alerts ->
-                weatherTemp = t; weatherHumidity = h; weatherCode = c; weatherWind = w
-                weatherLocation = loc; activeAlerts = alerts; weatherLoading = false
-                extremeAlert = alerts.firstOrNull { it.severity == "Extreme" }
+    // Only request location when Weather tab is opened
+    LaunchedEffect(currentTab, showAppDrawer) {
+        if (currentTab == LauncherTab.WEATHER && !showAppDrawer) {
+            val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            if (hasPerm) {
+                if (locationPermState != PermState.GRANTED) {
+                    locationPermState = PermState.GRANTED
+                    weatherLoading = true
+                    scope.launch {
+                        fetchWeather(context) { t, h, c, w, loc, alerts ->
+                            weatherTemp = t; weatherHumidity = h; weatherCode = c; weatherWind = w
+                            weatherLocation = loc; activeAlerts = alerts; weatherLoading = false
+                            extremeAlert = alerts.firstOrNull { it.severity == "Extreme" }
+                        }
+                    }
+                }
+            } else if (locationPermState == PermState.INITIAL) {
+                locationPermState = PermState.ASKING
+                locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            } else if (locationPermState == PermState.GRANTED) {
+                locationPermState = PermState.DENIED
+                weatherLoading = false
             }
         }
     }
