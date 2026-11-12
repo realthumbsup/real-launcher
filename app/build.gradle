@@ -11,8 +11,8 @@ android {
         applicationId "com.realos.launcher"
         minSdk 26
         targetSdk 34
-        versionCode 170
-        versionName "17.0"
+        versionCode 171
+        versionName "17.1"
     }
     buildTypes { release { minifyEnabled false } }
     compileOptions {

@@ -301,7 +301,7 @@ fun RealOSLauncher() {
 }
 
 @Composable
-fun BottomSheetOverlay(
+fun androidx.compose.foundation.layout.BoxScope.BottomSheetOverlay(
     expanded: Boolean, onToggle: () -> Unit,
     clockTime: String, dateStr: String,
     weatherTemp: Double?, weatherCode: Int?,
