@@ -154,7 +154,7 @@ fun RealOSLauncher() {
     }
     val currentDate = remember { SimpleDateFormat("EEEE, d. MMMM yyyy", Locale.getDefault()).format(Date()) }
 
-    val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+    val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permissions ->
         val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true || permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (granted) {
             locationPermState = PermState.GRANTED
@@ -190,7 +190,7 @@ fun RealOSLauncher() {
                 }
             } else if (locationPermState == PermState.INITIAL) {
                 locationPermState = PermState.ASKING
-                locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
             } else if (locationPermState == PermState.GRANTED) {
                 locationPermState = PermState.DENIED
                 weatherLoading = false
@@ -262,7 +262,7 @@ fun RealOSLauncher() {
                                 context.startActivity(intent)
                             } else {
                                 locationPermState = PermState.ASKING
-                                locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                                locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
                             }
                         }
                     )
