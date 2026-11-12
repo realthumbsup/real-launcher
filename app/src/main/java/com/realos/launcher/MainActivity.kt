@@ -32,8 +32,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -122,18 +122,26 @@ val CardBg = Color(0xFF1F1F1F)
 fun RealOSLauncher() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val prefs = remember { context.getSharedPreferences("real_os_prefs", Context.MODE_PRIVATE) }
 
     var currentTab by remember { mutableStateOf(LauncherTab.HOME) }
     var showAppDrawer by remember { mutableStateOf(false) }
     var sheetExpanded by remember { mutableStateOf(false) }
-    var isDraggingAnyTile by remember { mutableStateOf(false) }
 
-    val homeApps = remember { mutableStateListOf<AppInfo>() }
     val allApps = remember { getInstalledApps(context) }
-
-    var columns by remember { mutableStateOf(3) }
+    
+    // Persistence: Load saved home apps and grid size
+    val savedColumns = prefs.getInt("grid_columns", 3)
+    var columns by remember { mutableStateOf(savedColumns) }
+    
+    val savedPackages = prefs.getStringSet("home_apps", emptySet()) ?: emptySet()
+    val homeApps = remember { 
+        mutableStateListOf<AppInfo>().apply { 
+            addAll(allApps.filter { savedPackages.contains(it.packageName) }) 
+        } 
+    }
+    
     var isEditMode by remember { mutableStateOf(false) }
-
     var currentTime by remember { mutableStateOf("") }
 
     var weatherTemp by remember { mutableStateOf<Double?>(null) }
@@ -146,6 +154,12 @@ fun RealOSLauncher() {
     var extremeAlert by remember { mutableStateOf<WeatherAlert?>(null) }
     var locationPermState by remember { mutableStateOf(PermState.INITIAL) }
 
+    // Save state on changes
+    LaunchedEffect(columns) { prefs.edit().putInt("grid_columns", columns).apply() }
+    LaunchedEffect(homeApps.size) { 
+        prefs.edit().putStringSet("home_apps", homeApps.map { it.packageName }.toSet()).apply() 
+    }
+
     LaunchedEffect(Unit) {
         while (true) {
             currentTime = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
@@ -154,9 +168,8 @@ fun RealOSLauncher() {
     }
     val currentDate = remember { SimpleDateFormat("EEEE, d. MMMM yyyy", Locale.getDefault()).format(Date()) }
 
-    val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permissions ->
-        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true || permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        if (granted) {
+    val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        if (isGranted) {
             locationPermState = PermState.GRANTED
             weatherLoading = true
             scope.launch {
@@ -172,7 +185,6 @@ fun RealOSLauncher() {
         }
     }
 
-    // Only request location when Weather tab is opened
     LaunchedEffect(currentTab, showAppDrawer) {
         if (currentTab == LauncherTab.WEATHER && !showAppDrawer) {
             val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -191,9 +203,6 @@ fun RealOSLauncher() {
             } else if (locationPermState == PermState.INITIAL) {
                 locationPermState = PermState.ASKING
                 locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-            } else if (locationPermState == PermState.GRANTED) {
-                locationPermState = PermState.DENIED
-                weatherLoading = false
             }
         }
     }
@@ -242,11 +251,9 @@ fun RealOSLauncher() {
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding).background(GreyBg)) {
                 when {
-                    showAppDrawer -> AllAppsList(
-                        allApps = allApps,
-                        homeApps = homeApps,
-                        onAddToHome = { app -> if (!homeApps.contains(app)) homeApps.add(app) }
-                    )
+                    showAppDrawer -> AllAppsList(allApps, homeApps) { app -> 
+                        if (!homeApps.contains(app)) homeApps.add(app) 
+                    }
                     currentTab == LauncherTab.CALENDAR -> CalendarView(clockTime = currentTime)
                     currentTab == LauncherTab.WEATHER -> WeatherView(
                         temp = weatherTemp, humidity = weatherHumidity, code = weatherCode,
@@ -269,18 +276,10 @@ fun RealOSLauncher() {
                     else -> MetroHome(
                         homeApps = homeApps, columns = columns, isEditMode = isEditMode,
                         onLongPressEmptySpace = { isEditMode = true },
+                        onExitEditMode = { isEditMode = false },
                         onResize = { if (columns < 5) columns++ else columns = 2 },
-                        onMove = { from, to -> if (to in homeApps.indices) { val item = homeApps.removeAt(from); homeApps.add(to, item) } },
-                        onDragStateChanged = { isDraggingAnyTile = it }
+                        onMove = { from, to -> if (to in homeApps.indices) { val item = homeApps.removeAt(from); homeApps.add(to, item) } }
                     )
-                }
-            }
-        }
-
-        if (isDraggingAnyTile) {
-            Box(Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = 120.dp)) {
-                Box(Modifier.size(56.dp).background(Color(0xFF0078D7), CircleShape), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.ArrowDownward, "Drop zone", tint = Color.White, modifier = Modifier.size(32.dp).rotate(-45f))
                 }
             }
         }
@@ -291,7 +290,6 @@ fun RealOSLauncher() {
             clockTime = currentTime,
             dateStr = currentDate,
             weatherTemp = weatherTemp,
-            weatherCode = weatherCode,
             weatherDesc = getWeatherDesc(weatherCode ?: 0),
             weatherEmoji = getWeatherEmoji(weatherCode ?: 0),
             location = weatherLocation,
@@ -304,7 +302,7 @@ fun RealOSLauncher() {
 fun androidx.compose.foundation.layout.BoxScope.BottomSheetOverlay(
     expanded: Boolean, onToggle: () -> Unit,
     clockTime: String, dateStr: String,
-    weatherTemp: Double?, weatherCode: Int?,
+    weatherTemp: Double?,
     weatherDesc: String, weatherEmoji: String,
     location: String, alerts: List<WeatherAlert>
 ) {
@@ -411,15 +409,14 @@ fun MiniCalendar() {
 @Composable
 fun MetroHome(
     homeApps: MutableList<AppInfo>, columns: Int, isEditMode: Boolean,
-    onLongPressEmptySpace: () -> Unit, onResize: () -> Unit, onMove: (Int, Int) -> Unit,
-    onDragStateChanged: (Boolean) -> Unit
+    onLongPressEmptySpace: () -> Unit, onExitEditMode: () -> Unit, onResize: () -> Unit, onMove: (Int, Int) -> Unit
 ) {
     Column(
         modifier = Modifier.fillMaxSize().background(GreyBg).pointerInput(Unit) { detectTapGestures(onLongPress = { onLongPressEmptySpace() }) }
     ) {
         if (isEditMode) {
             Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Edit Mode: Drag tiles, resize grid", color = Color.Gray, fontSize = 13.sp)
+                Button(onClick = onExitEditMode, colors = ButtonDefaults.buttonColors(containerColor = Color.Gray)) { Text("Done") }
                 Button(onClick = onResize, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0078D7))) { Text("Grid: $columns Cols") }
             }
         }
@@ -435,7 +432,7 @@ fun MetroHome(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 itemsIndexed(homeApps, key = { _, app -> app.packageName }) { index, app ->
-                    MetroTile(app, isEditMode, index, columns, onMove, onDragStateChanged)
+                    MetroTile(app, isEditMode, index, columns, onMove)
                 }
             }
         }
@@ -443,7 +440,7 @@ fun MetroHome(
 }
 
 @Composable
-fun MetroTile(app: AppInfo, isEditMode: Boolean, index: Int, columns: Int, onMove: (Int, Int) -> Unit, onDragStateChanged: (Boolean) -> Unit) {
+fun MetroTile(app: AppInfo, isEditMode: Boolean, index: Int, columns: Int, onMove: (Int, Int) -> Unit) {
     val context = LocalContext.current
     val view = LocalView.current
     var offsetX by remember { mutableStateOf(0f) }
@@ -451,14 +448,14 @@ fun MetroTile(app: AppInfo, isEditMode: Boolean, index: Int, columns: Int, onMov
     var isDragging by remember { mutableStateOf(false) }
     var isLaunching by remember { mutableStateOf(false) }
 
-    val launchRotation by animateFloatAsState(if (isLaunching) 360f else 0f, tween(500, easing = FastOutSlowInEasing), label = "rot")
-    val launchScale by animateFloatAsState(if (isLaunching) 4f else 1f, tween(500, easing = FastOutSlowInEasing), label = "scale")
-
-    LaunchedEffect(isDragging) { onDragStateChanged(isDragging) }
+    // Spin and enlarge to fill the screen
+    val launchRotation by animateFloatAsState(if (isLaunching) 360f else 0f, tween(450, easing = FastOutSlowInEasing), label = "rot")
+    val launchScale by animateFloatAsState(if (isLaunching) 6f else 1f, tween(450, easing = FastOutSlowInEasing), label = "scale")
+    val launchAlpha by animateFloatAsState(if (isLaunching) 0f else 1f, tween(450), label = "alpha")
 
     LaunchedEffect(isLaunching) {
         if (isLaunching) {
-            delay(500)
+            delay(450)
             val intent = context.packageManager.getLaunchIntentForPackage(app.packageName)
             if (intent != null) {
                 context.startActivity(intent, ActivityOptions.makeScaleUpAnimation(view, 0, 0, view.width, view.height).toBundle())
@@ -475,6 +472,8 @@ fun MetroTile(app: AppInfo, isEditMode: Boolean, index: Int, columns: Int, onMov
                 rotationY = launchRotation
                 scaleX = launchScale
                 scaleY = launchScale
+                alpha = launchAlpha
+                transformOrigin = TransformOrigin.Center
                 cameraDistance = 12f * density
             }
             .background(if (isDragging) Color(0xFF444444) else getMetroColor(app.packageName), RoundedCornerShape(4.dp))
