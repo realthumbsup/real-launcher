@@ -93,9 +93,18 @@ fun RealOSLauncher() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
-    val wallpaperManager = WallpaperManager.getInstance(context)
-    val wallpaperDrawable = remember { wallpaperManager.drawable }
-    val wallpaperPainter = remember { wallpaperDrawable?.let { BitmapPainter(it.toBitmap().asImageBitmap()) } }
+    val wallpaperPainter = remember {
+        try {
+            val drawable = WallpaperManager.getInstance(context).drawable
+            if (drawable != null) {
+                // Downsample to prevent OutOfMemory crash on older phones
+                val bmp = drawable.toBitmap(width = 720, height = 1280)
+                BitmapPainter(bmp.asImageBitmap())
+            } else null
+        } catch (e: Throwable) {
+            null // Fallback to solid color if wallpaper fails
+        }
+    }
 
     var currentTab by remember { mutableStateOf(LauncherTab.HOME) }
     var showSearchOverlay by remember { mutableStateOf(false) }
