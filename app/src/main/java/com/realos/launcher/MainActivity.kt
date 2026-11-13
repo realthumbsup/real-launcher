@@ -190,8 +190,12 @@ fun wallpaperPermission(): String =
 // Returns null when the wallpaper can't be read, so the caller falls back to a solid background
 fun loadWallpaper(context: Context): BitmapPainter? = try {
     WallpaperManager.getInstance(context).drawable?.let { drawable ->
-        // Downsample to prevent OutOfMemory crash on older phones
-        BitmapPainter(drawable.toBitmap(720, 1280).asImageBitmap())
+        if (drawable is android.graphics.drawable.ColorDrawable) {
+            null // plain colour, not a picture: use the gradient fallback instead
+        } else {
+            // Downsample to prevent OutOfMemory crash on older phones
+            BitmapPainter(drawable.toBitmap(720, 1280).asImageBitmap())
+        }
     }
 } catch (e: Throwable) {
     null
@@ -296,7 +300,7 @@ fun RealOSLauncher(homeSignal: MutableState<Int>) {
             // Content area: everything above the dock. Nothing overlaps the dock.
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when (currentTab) {
-                    LauncherTab.HOME -> DesktopView(allApps, favoriteApps, { app -> launchApp(context, app.packageName) }, !showSearchOverlay) { showSearchOverlay = true }
+                    LauncherTab.HOME -> DesktopView(allApps, favoriteApps, { app -> launchApp(context, app.packageName) }) { showSearchOverlay = true }
                     LauncherTab.ALL_APPS -> AllAppsView(allApps) { app -> launchApp(context, app.packageName) }
                     LauncherTab.CALENDAR -> CalendarView()
                     LauncherTab.WEATHER -> WeatherView(weatherTemp, weatherCode, weatherLocation, weatherLoading, locationPermState, { locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION) })
@@ -554,9 +558,9 @@ fun AppTile(app: AppInfo, iconSize: Dp, labelSize: TextUnit, onClick: () -> Unit
     }
 }
 
-// Desktop: wallpaper, top-left apps, right glass dock, bottom search widget
+// Desktop: wallpaper, top-left apps, right glass dock
 @Composable
-fun DesktopView(allApps: List<AppInfo>, favoriteApps: List<AppInfo>, onLaunch: (AppInfo) -> Unit, showSearchWidget: Boolean, onSearchClick: () -> Unit) {
+fun DesktopView(allApps: List<AppInfo>, favoriteApps: List<AppInfo>, onLaunch: (AppInfo) -> Unit, onSearchClick: () -> Unit) {
     val topApps = allApps.take(4)
     Box(Modifier.fillMaxSize().statusBarsPadding()) {
         // Top-left app grid
@@ -580,22 +584,6 @@ fun DesktopView(allApps: List<AppInfo>, favoriteApps: List<AppInfo>, onLaunch: (
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             favoriteApps.forEach { app -> AppIcon(app, 52.dp) { onLaunch(app) } }
-        }
-
-        // Bottom search widget (hidden while the search overlay is open)
-        if (showSearchWidget) Column(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 24.dp, vertical = 12.dp)
-                .fillMaxWidth()
-                .sunGlass(28.dp)
-                .padding(14.dp)
-        ) {
-            SearchPill(onClick = onSearchClick)
-            Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                favoriteApps.forEach { app -> AppIcon(app, 48.dp) { onLaunch(app) } }
-            }
         }
     }
 }
