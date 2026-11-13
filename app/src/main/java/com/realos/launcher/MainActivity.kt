@@ -3,31 +3,39 @@
 package com.realos.launcher
 
 import android.Manifest
-import android.app.ActivityOptions
 import android.app.WallpaperManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Geocoder
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -35,19 +43,26 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.composed
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.BitmapPainter
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -65,44 +80,131 @@ import retrofit2.http.Query
 import java.text.SimpleDateFormat
 import java.util.*
 
-data class WeatherResponse(val current: CurrentWeather)
-data class CurrentWeather(val temperature_2m: Double, val relative_humidity_2m: Int, val apparent_temperature: Double, val weather_code: Int, val wind_speed_10m: Double, val wind_gusts_10m: Double? = null)
-data class WeatherAlert(val event: String, val severity: String, val headline: String)
-interface WeatherApi { @GET("v1/forecast") suspend fun getWeather(@Query("latitude") lat: Double, @Query("longitude") lon: Double, @Query("current") current: String = "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_gusts_10m"): WeatherResponse }
-fun getWeatherEmoji(code: Int): String = when (code) { 0 -> "☀️"; 1, 2 -> "🌤️"; 3 -> "☁️"; 45, 48 -> "🌫️"; 51, 53, 55 -> "🌦️"; 61, 63, 65 -> "🌧️"; 71, 73, 75 -> "❄️"; 80, 81, 82 -> "🌧️"; 95, 96, 99 -> "⛈️"; else -> "🌡️" }
-fun getWeatherDesc(code: Int): String = when (code) { 0 -> "Clear Sky"; 1, 2 -> "Partly Cloudy"; 3 -> "Overcast"; 45, 48 -> "Fog"; 51, 53, 55 -> "Drizzle"; 61, 63, 65 -> "Rain"; 71, 73, 75 -> "Snow"; 80, 81, 82 -> "Rain Showers"; 95 -> "Thunderstorm"; 96, 99 -> "Thunderstorm with Hail"; else -> "Unknown" }
-fun generateGlobalAlerts(weather: CurrentWeather): List<WeatherAlert> { val alerts = mutableListOf<WeatherAlert>(); if (weather.weather_code == 95) alerts.add(WeatherAlert("Thunderstorm", "Severe", "⚠️ Strong thunderstorms. Stay indoors.")); if (weather.weather_code == 96 || weather.weather_code == 99) alerts.add(WeatherAlert("Hail Warning", "Extreme", "⚠️ Severe hail. Seek shelter immediately.")); if ((weather.wind_gusts_10m ?: 0.0) > 80.0) alerts.add(WeatherAlert("High Wind", "Severe", "⚠️ Damaging wind gusts.")); return alerts }
 
 class MainActivity : ComponentActivity() {
+    private val homeSignal = mutableStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme(colorScheme = darkColorScheme()) { RealOSLauncher() } }
+        setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                val tilt = rememberTilt()
+                CompositionLocalProvider(LocalTilt provides tilt) { RealOSLauncher(homeSignal) }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        homeSignal.value++
     }
 }
 
 enum class LauncherTab { HOME, ALL_APPS, CALENDAR, WEATHER }
 enum class PermState { INITIAL, ASKING, GRANTED, DENIED }
 
-// Liquid Glass Theme Colors
-val GlassBg = Color(0x40FFFFFF) // Transparent white
-val GlassBorder = Color(0x66FFFFFF) // Faint white border
-val DarkGlassBg = Color(0x801A1A1A) // Darker glass for contrast
+val GlassBg = Color(0x40FFFFFF)
+val GlassBorder = Color(0x66FFFFFF)
+val DarkGlassBg = Color(0x801A1A1A)
+
+val LocalTilt = compositionLocalOf<State<Offset>> { mutableStateOf(Offset.Zero) }
 
 @Composable
-fun RealOSLauncher() {
+fun rememberTilt(): State<Offset> {
+    val context = LocalContext.current
+    val tilt = remember { mutableStateOf(Offset.Zero) }
+    DisposableEffect(context) {
+        val sm = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val sensor = sm.getDefaultSensor(Sensor.TYPE_GRAVITY) ?: sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                val x = (event.values[0] / 9.81f).coerceIn(-1f, 1f)
+                val y = (event.values[1] / 9.81f).coerceIn(-1f, 1f)
+                val prev = tilt.value
+                tilt.value = Offset(prev.x * 0.85f + x * 0.15f, prev.y * 0.85f + y * 0.15f)
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+        if (sensor != null) sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_GAME)
+        onDispose { sm.unregisterListener(listener) }
+    }
+    return tilt
+}
+
+fun Modifier.glass(shape: Shape): Modifier = composed {
+    val tiltState = LocalTilt.current
+    this
+        .clip(shape)
+        .drawWithContent {
+            val t = tiltState.value
+            drawRect(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.38f),
+                        Color(0xFFBFD8FF).copy(alpha = 0.22f),
+                        Color.White.copy(alpha = 0.16f)
+                    ),
+                    start = Offset(size.width * (0.5f - t.x * 0.4f), 0f),
+                    end = Offset(size.width * (0.5f + t.x * 0.4f), size.height)
+                )
+            )
+            drawContent()
+            val outline = shape.createOutline(size, layoutDirection, this)
+            val cx = size.width * (0.3f + (t.x + 1f) * 0.2f)
+            val cy = size.height * (0.2f + (t.y + 1f) * 0.2f)
+            drawOutline(
+                outline = outline,
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 1f),
+                        Color.White.copy(alpha = 0.35f),
+                        Color.White.copy(alpha = 0.60f)
+                    ),
+                    center = Offset(cx, cy),
+                    radius = size.maxDimension * 0.7f
+                ),
+                style = Stroke(width = 2.dp.toPx())
+            )
+        }
+}
+
+fun launchApp(context: Context, packageName: String) {
+    context.packageManager.getLaunchIntentForPackage(packageName)?.let { context.startActivity(it) }
+}
+
+fun currentMonthName(): String = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
+
+fun wallpaperPermission(): String =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_MEDIA_IMAGES
+    else Manifest.permission.READ_EXTERNAL_STORAGE
+
+fun loadWallpaper(context: Context): BitmapPainter? = try {
+    WallpaperManager.getInstance(context).drawable?.let { drawable ->
+        BitmapPainter(drawable.toBitmap(720, 1280).asImageBitmap())
+    }
+} catch (e: Throwable) {
+    null
+}
+
+@Composable
+fun RealOSLauncher(homeSignal: MutableState<Int>) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    
-    val wallpaperPainter = remember {
-        try {
-            val drawable = WallpaperManager.getInstance(context).drawable
-            if (drawable != null) {
-                // Downsample to prevent OutOfMemory crash on older phones
-                val bmp = drawable.toBitmap(width = 720, height = 1280)
-                BitmapPainter(bmp.asImageBitmap())
-            } else null
-        } catch (e: Throwable) {
-            null // Fallback to solid color if wallpaper fails
+
+    var wallpaperPainter by remember { mutableStateOf<BitmapPainter?>(null) }
+    var wallpaperAsked by remember { mutableStateOf(false) }
+    val wallpaperPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) wallpaperPainter = loadWallpaper(context)
+    }
+    LaunchedEffect(Unit) {
+        if (!wallpaperAsked) {
+            wallpaperAsked = true
+            val perm = wallpaperPermission()
+            if (ContextCompat.checkSelfPermission(context, perm) == PackageManager.PERMISSION_GRANTED) {
+                wallpaperPainter = loadWallpaper(context)
+            } else {
+                wallpaperPermissionLauncher.launch(perm)
+            }
         }
     }
 
@@ -146,205 +248,399 @@ fun RealOSLauncher() {
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        // WALLPAPER
-        if (wallpaperPainter != null) {
-            Image(painter = wallpaperPainter, contentDescription = "Wallpaper", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f))) 
-        } else { Box(Modifier.fillMaxSize().background(Color(0xFF1E1E1E))) }
+    LaunchedEffect(homeSignal.value) {
+        if (homeSignal.value > 0) {
+            currentTab = if (currentTab == LauncherTab.ALL_APPS) LauncherTab.HOME else LauncherTab.ALL_APPS
+            showSearchOverlay = false
+            sheetExpanded = false
+        }
+    }
 
-        Scaffold(
-            containerColor = Color.Transparent,
-            bottomBar = {
-                Box(Modifier.fillMaxWidth().padding(16.dp).clip(RoundedCornerShape(28.dp)).background(GlassBg).border(1.dp, GlassBorder, RoundedCornerShape(28.dp))) {
-                    NavigationBar(containerColor = Color.Transparent) {
-                        NavigationBarItem(selected = currentTab == LauncherTab.CALENDAR, onClick = { currentTab = LauncherTab.CALENDAR; sheetExpanded = false }, icon = { Icon(Icons.Default.DateRange, "Calendar") }, label = { Text("Calendar") }, colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF0078D7), selectedTextColor = Color(0xFF0078D7), unselectedIconColor = Color.White, unselectedTextColor = Color.Gray))
-                        NavigationBarItem(selected = currentTab == LauncherTab.HOME || currentTab == LauncherTab.ALL_APPS, onClick = { currentTab = LauncherTab.ALL_APPS; sheetExpanded = false }, icon = { Icon(Icons.Default.Home, "Apps") }, label = { Text("Apps") }, colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF0078D7), selectedTextColor = Color(0xFF0078D7), unselectedIconColor = Color.White, unselectedTextColor = Color.Gray))
-                        NavigationBarItem(selected = currentTab == LauncherTab.WEATHER, onClick = { currentTab = LauncherTab.WEATHER; sheetExpanded = false }, icon = { Icon(Icons.Default.Cloud, "Weather") }, label = { Text("Weather") }, colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFF0078D7), selectedTextColor = Color(0xFF0078D7), unselectedIconColor = Color.White, unselectedTextColor = Color.Gray))
-                    }
-                }
-            }
-        ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
+    BackHandler(enabled = showSearchOverlay || sheetExpanded || currentTab != LauncherTab.HOME) {
+        when {
+            showSearchOverlay -> showSearchOverlay = false
+            sheetExpanded -> sheetExpanded = false
+            else -> currentTab = LauncherTab.HOME
+        }
+    }
+
+    val onTab: (LauncherTab) -> Unit = { tab ->
+        currentTab = if (tab == LauncherTab.ALL_APPS && currentTab == LauncherTab.ALL_APPS) LauncherTab.HOME else tab
+        sheetExpanded = false
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        val wp = wallpaperPainter
+        if (wp != null) {
+            Image(painter = wp, contentDescription = "Wallpaper", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f)))
+        } else {
+            Box(Modifier.fillMaxSize().background(Color(0xFF1E1E1E)))
+        }
+
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
                 when (currentTab) {
-                    LauncherTab.HOME -> DesktopView(allApps, favoriteApps) { showSearchOverlay = true }
-                    LauncherTab.ALL_APPS -> AllAppsMenu(allApps)
+                    LauncherTab.HOME -> DesktopView(allApps, favoriteApps, { app -> launchApp(context, app.packageName) }) { showSearchOverlay = true }
+                    LauncherTab.ALL_APPS -> AllAppsView(allApps) { app -> launchApp(context, app.packageName) }
                     LauncherTab.CALENDAR -> CalendarView()
                     LauncherTab.WEATHER -> WeatherView(weatherTemp, weatherCode, weatherLocation, weatherLoading, locationPermState, { locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION) })
                 }
-            }
-        }
 
-        // Liquid Glass Swipe-Up Sheet
-        BottomSheetOverlay(
-            expanded = sheetExpanded,
-            onToggle = { sheetExpanded = !sheetExpanded },
-            clockTime = currentTime, dateStr = currentDate,
-            weatherTemp = weatherTemp, weatherCode = weatherCode,
-            weatherDesc = getWeatherDesc(weatherCode ?: 0), weatherEmoji = getWeatherEmoji(weatherCode ?: 0),
-            location = weatherLocation, alerts = activeAlerts
-        )
+                if (sheetExpanded) {
+                    SwipeUpSheet(
+                        clockTime = currentTime,
+                        dateStr = currentDate,
+                        weatherTemp = weatherTemp,
+                        weatherCode = weatherCode,
+                        location = weatherLocation,
+                        alerts = activeAlerts
+                    )
+                }
+            }
+
+            BottomDock(
+                currentTab = currentTab,
+                sheetExpanded = sheetExpanded,
+                onSheetChange = { sheetExpanded = it },
+                onTab = onTab,
+                onSearch = { showSearchOverlay = true }
+            )
+        }
 
         if (showSearchOverlay) SearchOverlay(allApps) { showSearchOverlay = false }
     }
 }
 
-@Composable
-fun androidx.compose.foundation.layout.BoxScope.BottomSheetOverlay(
-    expanded: Boolean, onToggle: () -> Unit, clockTime: String, dateStr: String,
-    weatherTemp: Double?, weatherCode: Int?, weatherDesc: String, weatherEmoji: String,
-    location: String, alerts: List<WeatherAlert>
-) {
-    val screenH = LocalConfiguration.current.screenHeightDp.dp
-    val collapsedH = 40.dp
-    val expandedH = screenH * 0.75f
-    val height by animateDpAsState(if (expanded) expandedH else collapsedH, tween(280), label = "sheetH")
-    val bottomPad by animateDpAsState(if (expanded) 0.dp else 90.dp, tween(280), label = "sheetPad")
-    var dragAccum by remember { mutableStateOf(0f) }
+val DockGrey = Color(0xFFB8BFC9)
 
-    Box(
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
+fun Modifier.sunGlass(shape: Shape): Modifier = composed {
+    val tiltState = LocalTilt.current
+    this
+        .clip(shape)
+        .drawWithContent {
+            val t = tiltState.value
+
+            drawRect(
+                brush = Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.34f),
+                        Color(0xFFBFD8FF).copy(alpha = 0.12f),
+                        Color.White.copy(alpha = 0.20f)
+                    )
+                )
+            )
+
+            val sunCenter = Offset(size.width * (0.5f + t.x * 0.4f), size.height * (0.3f + t.y * 0.3f))
+            drawRect(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFFFFF8E1).copy(alpha = 0.75f),
+                        Color(0xFFFFF8E1).copy(alpha = 0.25f),
+                        Color.Transparent
+                    ),
+                    center = sunCenter,
+                    radius = size.maxDimension * 0.45f
+                ),
+                blendMode = BlendMode.Screen
+            )
+
+            val sheenX = size.width * (0.5f + t.x * 0.35f)
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    colors = listOf(Color.Transparent, Color.White.copy(alpha = 0.45f), Color.Transparent),
+                    startX = sheenX - size.width * 0.15f,
+                    endX = sheenX + size.width * 0.15f
+                )
+            )
+
+            drawContent()
+
+            val outline = shape.createOutline(size, layoutDirection, this)
+            drawOutline(
+                outline = outline,
+                brush = Brush.sweepGradient(
+                    colors = listOf(
+                        Color.White,
+                        Color(0xFF9FB8E0),
+                        Color.White,
+                        Color(0xFFBFD8FF),
+                        Color.White
+                    ),
+                    center = sunCenter
+                ),
+                style = Stroke(width = 2.dp.toPx())
+            )
+        }
+}
+
+@Composable
+fun BottomDock(currentTab: LauncherTab, sheetExpanded: Boolean, onSheetChange: (Boolean) -> Unit, onTab: (LauncherTab) -> Unit, onSearch: () -> Unit) {
+    var dragAccum by remember { mutableStateOf(0f) }
+    Row(
+        Modifier
             .fillMaxWidth()
-            .padding(bottom = bottomPad, start = 16.dp, end = 16.dp) // Floats above dock
-            .height(height)
-            .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-            .background(GlassBg)
-            .border(1.dp, GlassBorder, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-            .pointerInput(Unit) {
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .height(78.dp)
+            .sunGlass(RoundedCornerShape(30.dp))
+            .pointerInput(sheetExpanded) {
                 detectVerticalDragGestures(
                     onVerticalDrag = { change, drag -> change.consume(); dragAccum += drag },
                     onDragEnd = {
-                        if (dragAccum < -40f && !expanded) onToggle()
-                        else if (dragAccum > 40f && expanded) onToggle()
+                        if (dragAccum < -40f && !sheetExpanded) onSheetChange(true)
+                        else if (dragAccum > 40f && sheetExpanded) onSheetChange(false)
                         dragAccum = 0f
                     }
                 )
             }
-            .pointerInput(Unit) { detectTapGestures { onToggle() } }
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 8.dp)) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Icon(if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp, "Swipe", tint = Color.White, modifier = Modifier.size(28.dp))
-            }
+        DockIcon("Calendar", Icons.Default.DateRange) { onTab(LauncherTab.CALENDAR) }
+        DockIcon("Home", Icons.Default.Home) { onTab(LauncherTab.ALL_APPS) }
+        DockSearch(Modifier.weight(1f)) { onSearch() }
+        DockIcon("Weather", Icons.Default.Cloud) { onTab(LauncherTab.WEATHER) }
+    }
+}
 
-            if (expanded) {
-                Spacer(Modifier.height(8.dp))
-                Text(clockTime, fontSize = 56.sp, fontWeight = FontWeight.Light, color = Color.White)
-                Text(dateStr, fontSize = 16.sp, color = Color.White.copy(alpha=0.7f))
-                Spacer(Modifier.height(20.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(weatherEmoji, fontSize = 40.sp)
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text("${weatherTemp?.toInt() ?: "--"}°C", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text("$weatherDesc • $location", fontSize = 13.sp, color = Color.White.copy(alpha=0.7f))
-                    }
-                }
-                Spacer(Modifier.height(20.dp))
-                Text("This month", fontSize = 13.sp, color = Color.White.copy(alpha=0.7f), fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
-                MiniCalendar()
-                Spacer(Modifier.height(12.dp))
-                alerts.forEach { alert ->
-                    Row(Modifier.fillMaxWidth().background(Color(0xFFB71C1C), RoundedCornerShape(8.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Warning, null, tint = Color.White, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(alert.headline, color = Color.White, fontSize = 12.sp)
-                    }
-                    Spacer(Modifier.height(4.dp))
-                }
+@Composable
+fun DockIcon(label: String, icon: ImageVector, onClick: () -> Unit) {
+    Box(Modifier.size(48.dp).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(imageVector = icon, contentDescription = label, tint = DockGrey, modifier = Modifier.size(26.dp))
+    }
+}
+
+@Composable
+fun DockSearch(modifier: Modifier, onClick: () -> Unit) {
+    Row(
+        modifier
+            .height(44.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.28f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.Search, contentDescription = "Search", tint = DockGrey, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Search", color = DockGrey, fontSize = 14.sp)
+    }
+}
+
+@Composable
+fun BoxScope.SwipeUpSheet(clockTime: String, dateStr: String, weatherTemp: Double?, weatherCode: Int?, location: String, alerts: List<WeatherAlert>) {
+    Column(
+        Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .fillMaxHeight(0.8f)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .glass(RoundedCornerShape(28.dp))
+            .padding(20.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text(clockTime, fontSize = 56.sp, fontWeight = FontWeight.Light, color = Color.White)
+        Text(dateStr, fontSize = 16.sp, color = Color.White.copy(alpha = 0.7f))
+        Spacer(Modifier.height(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(getWeatherEmoji(weatherCode ?: 0), fontSize = 40.sp)
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text("${weatherTemp?.toInt() ?: "--"}°C", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text("${getWeatherDesc(weatherCode ?: 0)} • $location", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
             }
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(currentMonthName(), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        Spacer(Modifier.height(8.dp))
+        MonthGrid(compact = true)
+        Spacer(Modifier.height(12.dp))
+        alerts.forEach { alert ->
+            Row(
+                Modifier.fillMaxWidth().background(Color(0xFFB71C1C), RoundedCornerShape(8.dp)).padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Warning, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(alert.headline, color = Color.White, fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(4.dp))
         }
     }
 }
 
 @Composable
-fun MiniCalendar() {
-    val cal = Calendar.getInstance()
-    val currentDay = cal.get(Calendar.DAY_OF_MONTH)
-    val monthName = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(cal.time)
-    val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-    val firstDay = cal.apply { set(Calendar.DAY_OF_MONTH, 1) }.get(Calendar.DAY_OF_WEEK) - 1
+fun MonthGrid(compact: Boolean) {
+    val today = Calendar.getInstance()
+    val currentDay = today.get(Calendar.DAY_OF_MONTH)
+    val daysInMonth = today.getActualMaximum(Calendar.DAY_OF_MONTH)
+    val firstDay = Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }.get(Calendar.DAY_OF_WEEK) - 1
+    val leading: List<Int?> = List(firstDay) { null }
+    val cells: List<Int?> = leading + (1..daysInMonth).map { it }
+    val textSize = if (compact) 11.sp else 16.sp
+    val dot = if (compact) 22.dp else 34.dp
 
     Column(Modifier.fillMaxWidth()) {
-        Text(monthName, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(bottom = 4.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-            listOf("S","M","T","W","T","F","S").forEach { Text(it, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0078D7)) }
-        }
-        Spacer(Modifier.height(4.dp))
-        LazyVerticalGrid(columns = GridCells.Fixed(7), modifier = Modifier.heightIn(max = 200.dp)) {
-            items(firstDay) { Spacer(Modifier.size(1.dp)) }
-            items(daysInMonth) { idx ->
-                val day = idx + 1; val isToday = day == currentDay
-                Box(Modifier.aspectRatio(1f), contentAlignment = Alignment.Center) {
-                    if (isToday) Box(Modifier.size(24.dp).background(Color.Red, CircleShape), contentAlignment = Alignment.Center) { Text("$day", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold) } 
-                    else Text("$day", fontSize = 11.sp, color = Color.White)
-                }
+        Row(Modifier.fillMaxWidth()) {
+            listOf("S", "M", "T", "W", "T", "F", "S").forEach { d ->
+                Text(d, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = textSize, fontWeight = FontWeight.Bold, color = Color(0xFF0A84FF))
             }
         }
-    }
-}
-
-@Composable
-fun DesktopView(allApps: List<AppInfo>, favoriteApps: List<AppInfo>, onSearchClick: () -> Unit) {
-    val initialApps = allApps.take(6)
-    Box(Modifier.fillMaxSize()) {
-        // Top Left Desktop Icons
-        Column(modifier = Modifier.padding(16.dp).width(160.dp)) {
-            initialApps.chunked(2).forEach { rowApps ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    rowApps.forEach { app ->
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(8.dp)) {
-                            Image(app.icon.toBitmap(100, 100).asImageBitmap(), app.label, modifier = Modifier.size(48.dp))
-                            Text(app.label, color = Color.White, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        cells.chunked(7).forEach { week ->
+            Row(Modifier.fillMaxWidth()) {
+                for (i in 0 until 7) {
+                    val day = week.getOrNull(i)
+                    Box(Modifier.weight(1f).aspectRatio(1f), contentAlignment = Alignment.Center) {
+                        if (day != null) {
+                            if (day == currentDay) {
+                                Box(Modifier.size(dot).background(Color.Red, CircleShape), contentAlignment = Alignment.Center) {
+                                    Text("$day", fontSize = textSize, color = Color.White, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Text("$day", fontSize = textSize, color = Color.White)
+                            }
                         }
                     }
                 }
             }
         }
+    }
+}
 
-        // Right Liquid Glass Dock
-        Box(modifier = Modifier.align(Alignment.CenterEnd).padding(end = 16.dp).width(72.dp).clip(RoundedCornerShape(36.dp)).background(GlassBg).border(1.dp, GlassBorder, RoundedCornerShape(36.dp)).padding(vertical = 16.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                favoriteApps.forEach { app -> Image(app.icon.toBitmap(100, 100).asImageBitmap(), app.label, modifier = Modifier.size(52.dp).clip(RoundedCornerShape(12.dp))) }
+@Composable
+fun AppIcon(app: AppInfo, size: Dp, onClick: () -> Unit) {
+    Image(
+        bitmap = app.icon.toBitmap(128, 128).asImageBitmap(),
+        contentDescription = app.label,
+        modifier = Modifier.size(size).clip(RoundedCornerShape(size * 0.22f)).clickable(onClick = onClick)
+    )
+}
+
+@Composable
+fun AppTile(app: AppInfo, iconSize: Dp, labelSize: TextUnit, onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.width(iconSize + 16.dp).padding(6.dp)
+    ) {
+        AppIcon(app, iconSize, onClick)
+        Spacer(Modifier.height(4.dp))
+        Text(app.label, color = Color.White, fontSize = labelSize, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+fun DesktopView(allApps: List<AppInfo>, favoriteApps: List<AppInfo>, onLaunch: (AppInfo) -> Unit, onSearchClick: () -> Unit) {
+    val topApps = allApps.take(4)
+    Box(Modifier.fillMaxSize().statusBarsPadding()) {
+        Column(Modifier.padding(16.dp).width(200.dp)) {
+            topApps.chunked(2).forEach { row ->
+                Row(Modifier.fillMaxWidth()) {
+                    row.forEach { app -> AppTile(app, 56.dp, 11.sp) { onLaunch(app) } }
+                }
             }
         }
 
-        // Bottom Center Search Widget
-        Box(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp).width(280.dp).clip(RoundedCornerShape(28.dp)).background(GlassBg).border(1.dp, GlassBorder, RoundedCornerShape(28.dp)).padding(16.dp)) {
-            Column {
-                Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.3f)).border(1.dp, GlassBorder, RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 8.dp).combinedClickable(onClick = onSearchClick), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Search, "Search", tint = Color.White, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Search apps...", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    favoriteApps.take(4).forEach { app -> Image(app.icon.toBitmap(100, 100).asImageBitmap(), app.label, modifier = Modifier.size(40.dp)) }
-                }
+        Column(
+            Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 12.dp)
+                .width(80.dp)
+                .sunGlass(RoundedCornerShape(36.dp))
+                .padding(vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            favoriteApps.forEach { app -> AppIcon(app, 52.dp) { onLaunch(app) } }
+        }
+
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 24.dp, vertical = 12.dp)
+                .fillMaxWidth()
+                .sunGlass(RoundedCornerShape(28.dp))
+                .padding(14.dp)
+        ) {
+            SearchPill(onClick = onSearchClick)
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                favoriteApps.forEach { app -> AppIcon(app, 48.dp) { onLaunch(app) } }
             }
         }
+    }
+}
+
+@Composable
+fun SearchPill(onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.35f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Search apps...", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
     }
 }
 
 @Composable
 fun SearchOverlay(allApps: List<AppInfo>, onDismiss: () -> Unit) {
-    val context = LocalContext.current; val view = LocalView.current
+    val context = LocalContext.current
     var query by remember { mutableStateOf("") }
-    val filteredApps = allApps.filter { it.label.contains(query, ignoreCase = true) }
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.8f))) {
-        Column(Modifier.fillMaxSize().padding(24.dp)) {
-            Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(GlassBg).border(1.dp, GlassBorder, RoundedCornerShape(20.dp)).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Search, "Search", tint = Color.White); Spacer(Modifier.width(8.dp))
-                BasicTextField(value = query, onValueChange = { query = it }, textStyle = TextStyle(color = Color.White, fontSize = 18.sp), modifier = Modifier.weight(1f), decorationBox = { inner -> if (query.isEmpty()) Text("Search apps...", color = Color.White.copy(alpha = 0.5f), fontSize = 18.sp); inner() })
-                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Close", tint = Color.White) }
+    val filtered = allApps.filter { it.label.contains(query, ignoreCase = true) }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.45f))
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss)
+    ) {
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .fillMaxHeight(0.72f)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .sunGlass(RoundedCornerShape(28.dp))
+                .padding(16.dp)
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {})
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.Black.copy(alpha = 0.3f))
+                    .border(1.dp, GlassBorder, RoundedCornerShape(20.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                BasicTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    textStyle = TextStyle(color = Color.White, fontSize = 18.sp),
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    decorationBox = { inner ->
+                        if (query.isEmpty()) Text("Search apps...", color = Color.White.copy(alpha = 0.5f), fontSize = 18.sp)
+                        inner()
+                    }
+                )
+                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White) }
             }
-            Spacer(Modifier.height(16.dp))
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(filteredApps, key = { it.packageName }) { app ->
-                    Row(modifier = Modifier.fillMaxWidth().combinedClickable(onClick = { val intent = context.packageManager.getLaunchIntentForPackage(app.packageName); if (intent != null) context.startActivity(intent, ActivityOptions.makeScaleUpAnimation(view, 0, 0, view.width, view.height).toBundle()) }).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Image(app.icon.toBitmap(100, 100).asImageBitmap(), app.label, modifier = Modifier.size(48.dp)); Spacer(Modifier.width(16.dp)); Text(app.label, color = Color.White, fontSize = 18.sp)
+            Spacer(Modifier.height(14.dp))
+            LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.weight(1f)) {
+                gridItems(filtered, key = { it.packageName }) { app ->
+                    AppTile(app, 60.dp, 11.sp) {
+                        launchApp(context, app.packageName)
+                        onDismiss()
                     }
                 }
             }
@@ -353,17 +649,32 @@ fun SearchOverlay(allApps: List<AppInfo>, onDismiss: () -> Unit) {
 }
 
 @Composable
-fun AllAppsMenu(allApps: List<AppInfo>) {
-    val context = LocalContext.current; val view = LocalView.current
-    // Floating glass list instead of solid background
-    Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-        Column(Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(GlassBg).border(1.dp, GlassBorder, RoundedCornerShape(24.dp)).padding(16.dp)) {
-            Text("All Apps", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp))
-            LazyColumn {
-                items(allApps, key = { it.packageName }) { app ->
-                    Row(modifier = Modifier.fillMaxWidth().combinedClickable(onClick = { val intent = context.packageManager.getLaunchIntentForPackage(app.packageName); if (intent != null) context.startActivity(intent, ActivityOptions.makeScaleUpAnimation(view, 0, 0, view.width, view.height).toBundle()) }).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Image(app.icon.toBitmap(100, 100).asImageBitmap(), app.label, modifier = Modifier.size(48.dp)); Spacer(Modifier.width(16.dp)); Text(app.label, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-                    }
+fun AllAppsView(allApps: List<AppInfo>, onLaunch: (AppInfo) -> Unit) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(16.dp)
+            .glass(RoundedCornerShape(28.dp))
+            .padding(16.dp)
+    ) {
+        Text("All Apps", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
+        LazyColumn(Modifier.weight(1f)) {
+            items(allApps, key = { it.packageName }) { app ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onLaunch(app) }
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Image(
+                        bitmap = app.icon.toBitmap(128, 128).asImageBitmap(),
+                        contentDescription = app.label,
+                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp))
+                    )
+                    Spacer(Modifier.width(16.dp))
+                    Text(app.label, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -372,37 +683,19 @@ fun AllAppsMenu(allApps: List<AppInfo>) {
 
 @Composable
 fun CalendarView() {
-    val cal = Calendar.getInstance()
-    val currentDay = cal.get(Calendar.DAY_OF_MONTH)
-    val monthName = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(cal.time)
-    val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-    val firstDay = cal.apply { set(Calendar.DAY_OF_MONTH, 1) }.get(Calendar.DAY_OF_WEEK) - 1
-
-    // Floating Glass Calendar Card
-    Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(GlassBg).border(1.dp, GlassBorder, RoundedCornerShape(24.dp)).padding(24.dp)) {
-            Text(monthName, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
+    Box(Modifier.fillMaxSize().statusBarsPadding().padding(16.dp), contentAlignment = Alignment.Center) {
+        Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(24.dp)).padding(24.dp)) {
+            Text(currentMonthName(), fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
             Spacer(Modifier.height(16.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) { listOf("S","M","T","W","T","F","S").forEach { Text(it, fontWeight = FontWeight.Bold, color = Color(0xFF0078D7)) } }
-            Spacer(Modifier.height(8.dp))
-            LazyVerticalGrid(columns = GridCells.Fixed(7)) {
-                items(firstDay) { Spacer(Modifier.size(1.dp)) }
-                items(daysInMonth) { idx ->
-                    val day = idx + 1; val isToday = day == currentDay
-                    Box(Modifier.aspectRatio(1f), contentAlignment = Alignment.Center) {
-                        if (isToday) Box(Modifier.size(36.dp).background(Color.Red, CircleShape), contentAlignment = Alignment.Center) { Text("$day", fontSize = 16.sp, color = Color.White, fontWeight = FontWeight.Bold) } else { Text("$day", fontSize = 16.sp, color = Color.White) }
-                    }
-                }
-            }
+            MonthGrid(compact = false)
         }
     }
 }
 
 @Composable
 fun WeatherView(temp: Double?, code: Int?, location: String, loading: Boolean, permState: PermState, onRetry: () -> Unit) {
-    // Floating Glass Weather Card
-    Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(GlassBg).border(1.dp, GlassBorder, RoundedCornerShape(24.dp)).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Box(Modifier.fillMaxSize().statusBarsPadding().padding(16.dp), contentAlignment = Alignment.Center) {
+        Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(24.dp)).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             if (permState == PermState.DENIED) {
                 Text("📍", fontSize = 64.sp); Spacer(Modifier.height(16.dp))
                 Text("Permission for location not granted", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center); Spacer(Modifier.height(24.dp))
@@ -418,6 +711,14 @@ fun WeatherView(temp: Double?, code: Int?, location: String, loading: Boolean, p
         }
     }
 }
+
+data class WeatherResponse(val current: CurrentWeather)
+data class CurrentWeather(val temperature_2m: Double, val relative_humidity_2m: Int, val apparent_temperature: Double, val weather_code: Int, val wind_speed_10m: Double, val wind_gusts_10m: Double? = null)
+data class WeatherAlert(val event: String, val severity: String, val headline: String)
+interface WeatherApi { @GET("v1/forecast") suspend fun getWeather(@Query("latitude") lat: Double, @Query("longitude") lon: Double, @Query("current") current: String = "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_gusts_10m"): WeatherResponse }
+fun getWeatherEmoji(code: Int): String = when (code) { 0 -> "☀️"; 1, 2 -> "🌤️"; 3 -> "☁️"; 45, 48 -> "🌫️"; 51, 53, 55 -> "🌦️"; 61, 63, 65 -> "🌧️"; 71, 73, 75 -> "❄️"; 80, 81, 82 -> "🌧️"; 95, 96, 99 -> "⛈️"; else -> "🌡️" }
+fun getWeatherDesc(code: Int): String = when (code) { 0 -> "Clear Sky"; 1, 2 -> "Partly Cloudy"; 3 -> "Overcast"; 45, 48 -> "Fog"; 51, 53, 55 -> "Drizzle"; 61, 63, 65 -> "Rain"; 71, 73, 75 -> "Snow"; 80, 81, 82 -> "Rain Showers"; 95 -> "Thunderstorm"; 96, 99 -> "Thunderstorm with Hail"; else -> "Unknown" }
+fun generateGlobalAlerts(weather: CurrentWeather): List<WeatherAlert> { val alerts = mutableListOf<WeatherAlert>(); if (weather.weather_code == 95) alerts.add(WeatherAlert("Thunderstorm", "Severe", "⚠️ Strong thunderstorms. Stay indoors.")); if (weather.weather_code == 96 || weather.weather_code == 99) alerts.add(WeatherAlert("Hail Warning", "Extreme", "⚠️ Severe hail. Seek shelter immediately.")); if ((weather.wind_gusts_10m ?: 0.0) > 80.0) alerts.add(WeatherAlert("High Wind", "Severe", "⚠️ Damaging wind gusts.")); return alerts }
 
 suspend fun fetchWeather(context: Context, onResult: (Double?, Int?, Int?, Double?, String, List<WeatherAlert>) -> Unit) {
     try {
