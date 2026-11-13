@@ -26,7 +26,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -46,6 +45,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawOutline
 import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -82,6 +82,7 @@ import java.util.*
 
 
 class MainActivity : ComponentActivity() {
+    // Increments every time Home is pressed while the launcher is already open
     private val homeSignal = mutableStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -103,10 +104,12 @@ class MainActivity : ComponentActivity() {
 enum class LauncherTab { HOME, ALL_APPS, CALENDAR, WEATHER }
 enum class PermState { INITIAL, ASKING, GRANTED, DENIED }
 
+// Liquid Glass Theme Colors
 val GlassBg = Color(0x40FFFFFF)
 val GlassBorder = Color(0x66FFFFFF)
 val DarkGlassBg = Color(0x801A1A1A)
 
+// Device tilt (from gravity sensor, no permission needed). Values roughly -1..1.
 val LocalTilt = compositionLocalOf<State<Offset>> { mutableStateOf(Offset.Zero) }
 
 @Composable
@@ -120,6 +123,7 @@ fun rememberTilt(): State<Offset> {
             override fun onSensorChanged(event: SensorEvent) {
                 val x = (event.values[0] / 9.81f).coerceIn(-1f, 1f)
                 val y = (event.values[1] / 9.81f).coerceIn(-1f, 1f)
+                // Smooth the readings so the highlight glides instead of jittering
                 val prev = tilt.value
                 tilt.value = Offset(prev.x * 0.85f + x * 0.15f, prev.y * 0.85f + y * 0.15f)
             }
@@ -131,12 +135,14 @@ fun rememberTilt(): State<Offset> {
     return tilt
 }
 
+// Liquid-glass look: translucent body and a specular rim. Both move with the device tilt.
 fun Modifier.glass(shape: Shape): Modifier = composed {
     val tiltState = LocalTilt.current
     this
         .clip(shape)
         .drawWithContent {
             val t = tiltState.value
+            // Body sheen: light band that slides with tilt
             drawRect(
                 brush = Brush.linearGradient(
                     colors = listOf(
@@ -149,6 +155,7 @@ fun Modifier.glass(shape: Shape): Modifier = composed {
                 )
             )
             drawContent()
+            // Specular rim: a bright spot that follows the tilt
             val outline = shape.createOutline(size, layoutDirection, this)
             val cx = size.width * (0.3f + (t.x + 1f) * 0.2f)
             val cy = size.height * (0.2f + (t.y + 1f) * 0.2f)
@@ -174,12 +181,15 @@ fun launchApp(context: Context, packageName: String) {
 
 fun currentMonthName(): String = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
 
+// Wallpaper: Android 13+ needs READ_MEDIA_IMAGES, older versions need READ_EXTERNAL_STORAGE
 fun wallpaperPermission(): String =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_MEDIA_IMAGES
     else Manifest.permission.READ_EXTERNAL_STORAGE
 
+// Returns null when the wallpaper can't be read, so the caller falls back to a solid background
 fun loadWallpaper(context: Context): BitmapPainter? = try {
     WallpaperManager.getInstance(context).drawable?.let { drawable ->
+        // Downsample to prevent OutOfMemory crash on older phones
         BitmapPainter(drawable.toBitmap(720, 1280).asImageBitmap())
     }
 } catch (e: Throwable) {
@@ -248,6 +258,7 @@ fun RealOSLauncher(homeSignal: MutableState<Int>) {
         }
     }
 
+    // Home button pressed again while open: toggle between All Apps and the desktop
     LaunchedEffect(homeSignal.value) {
         if (homeSignal.value > 0) {
             currentTab = if (currentTab == LauncherTab.ALL_APPS) LauncherTab.HOME else LauncherTab.ALL_APPS
@@ -256,6 +267,7 @@ fun RealOSLauncher(homeSignal: MutableState<Int>) {
         }
     }
 
+    // Back closes the top-most layer first, then returns to the desktop
     BackHandler(enabled = showSearchOverlay || sheetExpanded || currentTab != LauncherTab.HOME) {
         when {
             showSearchOverlay -> showSearchOverlay = false
@@ -270,6 +282,7 @@ fun RealOSLauncher(homeSignal: MutableState<Int>) {
     }
 
     Box(Modifier.fillMaxSize()) {
+        // WALLPAPER
         val wp = wallpaperPainter
         if (wp != null) {
             Image(painter = wp, contentDescription = "Wallpaper", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -279,6 +292,7 @@ fun RealOSLauncher(homeSignal: MutableState<Int>) {
         }
 
         Column(Modifier.fillMaxSize()) {
+            // Content area: everything above the dock. Nothing overlaps the dock.
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when (currentTab) {
                     LauncherTab.HOME -> DesktopView(allApps, favoriteApps, { app -> launchApp(context, app.packageName) }) { showSearchOverlay = true }
@@ -314,6 +328,8 @@ fun RealOSLauncher(homeSignal: MutableState<Int>) {
 
 val DockGrey = Color(0xFFB8BFC9)
 
+// Sun glass: a light glass body with a warm sun glare and a sheen that move with the tilt
+// in both directions (left-right and up-down). Only bars and search panels use this.
 fun Modifier.sunGlass(shape: Shape): Modifier = composed {
     val tiltState = LocalTilt.current
     this
@@ -321,6 +337,7 @@ fun Modifier.sunGlass(shape: Shape): Modifier = composed {
         .drawWithContent {
             val t = tiltState.value
 
+            // Glass body: light, translucent, slightly blue
             drawRect(
                 brush = Brush.verticalGradient(
                     listOf(
@@ -331,6 +348,7 @@ fun Modifier.sunGlass(shape: Shape): Modifier = composed {
                 )
             )
 
+            // Sun glare: a warm light spot that slides across the glass as the phone tilts
             val sunCenter = Offset(size.width * (0.5f + t.x * 0.4f), size.height * (0.3f + t.y * 0.3f))
             drawRect(
                 brush = Brush.radialGradient(
@@ -345,6 +363,7 @@ fun Modifier.sunGlass(shape: Shape): Modifier = composed {
                 blendMode = BlendMode.Screen
             )
 
+            // Sheen band that follows the left-right tilt
             val sheenX = size.width * (0.5f + t.x * 0.35f)
             drawRect(
                 brush = Brush.horizontalGradient(
@@ -356,6 +375,7 @@ fun Modifier.sunGlass(shape: Shape): Modifier = composed {
 
             drawContent()
 
+            // Bright rim that rotates with the up-down and left-right tilt
             val outline = shape.createOutline(size, layoutDirection, this)
             drawOutline(
                 outline = outline,
@@ -429,6 +449,7 @@ fun DockSearch(modifier: Modifier, onClick: () -> Unit) {
     }
 }
 
+// Swipe-up panel: opens above the dock inside the content area
 @Composable
 fun BoxScope.SwipeUpSheet(clockTime: String, dateStr: String, weatherTemp: Double?, weatherCode: Int?, location: String, alerts: List<WeatherAlert>) {
     Column(
@@ -471,6 +492,7 @@ fun BoxScope.SwipeUpSheet(clockTime: String, dateStr: String, weatherTemp: Doubl
     }
 }
 
+// Month grid built from plain Rows (no lazy lists, so it can't crash inside a scrolling column)
 @Composable
 fun MonthGrid(compact: Boolean) {
     val today = Calendar.getInstance()
@@ -509,6 +531,7 @@ fun MonthGrid(compact: Boolean) {
     }
 }
 
+// Square app icon with rounded corners (iOS-style)
 @Composable
 fun AppIcon(app: AppInfo, size: Dp, onClick: () -> Unit) {
     Image(
@@ -530,10 +553,12 @@ fun AppTile(app: AppInfo, iconSize: Dp, labelSize: TextUnit, onClick: () -> Unit
     }
 }
 
+// Desktop: wallpaper, top-left apps, right glass dock, bottom search widget
 @Composable
 fun DesktopView(allApps: List<AppInfo>, favoriteApps: List<AppInfo>, onLaunch: (AppInfo) -> Unit, onSearchClick: () -> Unit) {
     val topApps = allApps.take(4)
     Box(Modifier.fillMaxSize().statusBarsPadding()) {
+        // Top-left app grid
         Column(Modifier.padding(16.dp).width(200.dp)) {
             topApps.chunked(2).forEach { row ->
                 Row(Modifier.fillMaxWidth()) {
@@ -542,6 +567,7 @@ fun DesktopView(allApps: List<AppInfo>, favoriteApps: List<AppInfo>, onLaunch: (
             }
         }
 
+        // Right glass dock (vertical)
         Column(
             Modifier
                 .align(Alignment.CenterEnd)
@@ -555,6 +581,7 @@ fun DesktopView(allApps: List<AppInfo>, favoriteApps: List<AppInfo>, onLaunch: (
             favoriteApps.forEach { app -> AppIcon(app, 52.dp) { onLaunch(app) } }
         }
 
+        // Bottom search widget
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
@@ -589,6 +616,7 @@ fun SearchPill(onClick: () -> Unit) {
     }
 }
 
+// Search: tapping the search bar opens this glass panel with a search box and square app icons
 @Composable
 fun SearchOverlay(allApps: List<AppInfo>, onDismiss: () -> Unit) {
     val context = LocalContext.current
@@ -609,6 +637,7 @@ fun SearchOverlay(allApps: List<AppInfo>, onDismiss: () -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .sunGlass(RoundedCornerShape(28.dp))
                 .padding(16.dp)
+                // Taps inside the panel must not reach the dismiss layer behind it
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {})
         ) {
             Row(
@@ -648,6 +677,7 @@ fun SearchOverlay(allApps: List<AppInfo>, onDismiss: () -> Unit) {
     }
 }
 
+// All Apps list: app icon on the left, app name on the right
 @Composable
 fun AllAppsView(allApps: List<AppInfo>, onLaunch: (AppInfo) -> Unit) {
     Column(
